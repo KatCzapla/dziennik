@@ -5,7 +5,4 @@ local.properties
 *.iml
 captures/
 app/build/
-/uonet-poc/.idea/.gitignore
-/uonet-poc/.idea/modules.xml
-/uonet-poc/.idea/uonet-poc.iml
-/uonet-poc/.idea/vcs.xml
+/uonet-poc

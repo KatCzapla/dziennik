@@ -4,7 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import pl.katcz.edziennik.ui.home.HomeRoute
+import pl.katcz.edziennik.ui.login.LoginRoute
+import pl.katcz.edziennik.ui.timetable.TimetableRoute
 
 @Composable
 fun EDziennikNavHost() {
@@ -15,7 +16,18 @@ fun EDziennikNavHost() {
         startDestination = "home",
     ) {
         composable("home") {
-            HomeRoute()
+            LoginRoute(
+                onOpenTimetable = {
+                    navController.navigate("timetable")
+                },
+            )
+        }
+        composable("timetable") {
+            TimetableRoute(
+                onBack = {
+                    navController.popBackStack()
+                },
+            )
         }
     }
 }
