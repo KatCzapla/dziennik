@@ -1,10 +1,8 @@
 package pl.katcz.edziennik.ui.timetable
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,40 +12,57 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import kotlinx.coroutines.launch
 import pl.katcz.edziennik.domain.Student
 import pl.katcz.edziennik.domain.TimetableChange
 import pl.katcz.edziennik.domain.TimetableEntry
-import pl.katcz.edziennik.ui.components.EmptyState
+import pl.katcz.edziennik.domain.time.WeekRange
+import pl.katcz.edziennik.ui.components.EDziennikTopBar
 import pl.katcz.edziennik.ui.components.ErrorState
-import pl.katcz.edziennik.ui.components.QuietLoadingState
-import pl.katcz.edziennik.ui.components.StudentSwitcher
 import pl.katcz.edziennik.ui.theme.EDziennikTheme
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import java.util.Locale
+
+private const val PagerStartPage = Int.MAX_VALUE / 2
 
 @Composable
 fun TimetableRoute(
@@ -59,9 +74,10 @@ fun TimetableRoute(
     TimetableScreen(
         state = state,
         onBack = onBack,
+        onDateSelected = viewModel::selectDate,
         onPreviousWeek = viewModel::previousWeek,
         onNextWeek = viewModel::nextWeek,
-        onCurrentWeek = viewModel::currentWeek,
+        onToday = viewModel::currentWeek,
         onRetry = viewModel::retry,
         onStudentSelected = viewModel::selectStudent,
     )
@@ -71,21 +87,40 @@ fun TimetableRoute(
 private fun TimetableScreen(
     state: TimetableUiState,
     onBack: () -> Unit,
+    onDateSelected: (LocalDate) -> Unit,
     onPreviousWeek: () -> Unit,
     onNextWeek: () -> Unit,
-    onCurrentWeek: () -> Unit,
+    onToday: () -> Unit,
     onRetry: () -> Unit,
     onStudentSelected: (Student) -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
+    val anchorDate = remember { state.selectedDate }
+    val pagerState = rememberPagerState(initialPage = PagerStartPage) { Int.MAX_VALUE }
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(pagerState, anchorDate) {
+        snapshotFlow { pagerState.settledPage }
+            .collect { page ->
+                onDateSelected(schoolDateAtOffset(anchorDate, page - PagerStartPage))
+            }
+    }
+
+    LaunchedEffect(state.selectedDate, anchorDate) {
+        val targetPage = PagerStartPage + schoolDateOffset(anchorDate, state.selectedDate)
+        if (targetPage != pagerState.currentPage) {
+            pagerState.animateScrollToPage(targetPage)
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TimetableChrome(
+            EDziennikTopBar(
                 activeStudent = state.activeStudent,
                 students = state.students,
                 onStudentSelected = onStudentSelected,
+                showBack = true,
                 onBack = onBack,
             )
         },
@@ -95,39 +130,58 @@ private fun TimetableScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(horizontal = spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(spacing.md),
         ) {
-            WeekNavigator(
-                weekLabel = state.week.label(),
+            TimetableHeader(
+                displayedWeek = state.displayedWeek,
+                selectedDate = state.selectedDate,
                 onPreviousWeek = onPreviousWeek,
                 onNextWeek = onNextWeek,
-                onCurrentWeek = onCurrentWeek,
+                onToday = onToday,
+                onDayClick = { date ->
+                    coroutineScope.launch {
+                        pagerState.animateScrollToPage(
+                            PagerStartPage + schoolDateOffset(anchorDate, date),
+                        )
+                    }
+                },
             )
 
-            AnimatedContent(
-                targetState = state.contentMode,
-                transitionSpec = { fadeIn() togetherWith fadeOut() },
-                label = "timetable-content",
-            ) { mode ->
-                when (mode) {
-                    TimetableContentMode.Loading -> QuietLoadingState(
-                        title = "Pobieram plan",
-                        message = "Zostawiam układ na miejscu i tylko odświeżam dane.",
-                    )
-                    TimetableContentMode.Error -> ErrorState(
-                        title = "Plan chwilowo niedostępny",
-                        message = state.errorMessage.orEmpty(),
-                        actionLabel = "Spróbuj ponownie",
-                        onAction = onRetry,
-                    )
-                    TimetableContentMode.Empty -> EmptyState(
-                        title = "Brak zajęć w tym tygodniu",
-                        message = "Wygląda na spokojniejszy tydzień albo plan nie został jeszcze opublikowany.",
-                    )
-                    TimetableContentMode.Content -> TimetableList(
-                        weekStart = state.week.start,
-                        entries = state.entries,
-                    )
+            if (state.errorMessage != null) {
+                ErrorState(
+                    title = "Plan chwilowo niedostępny",
+                    message = state.errorMessage,
+                    actionLabel = "Spróbuj ponownie",
+                    onAction = onRetry,
+                )
+            } else {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize(),
+                        beyondViewportPageCount = 1,
+                        key = { page -> schoolDateAtOffset(anchorDate, page - PagerStartPage) },
+                    ) { page ->
+                        val pageDate = schoolDateAtOffset(anchorDate, page - PagerStartPage)
+                        DayPlanPage(
+                            date = pageDate,
+                            entries = if (pageDate == state.selectedDate) {
+                                state.selectedDayEntries
+                            } else {
+                                state.entries.filter { it.date == pageDate }
+                            },
+                        )
+                    }
+
+                    if (state.isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = spacing.sm)
+                                .size(22.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
                 }
             }
         }
@@ -135,279 +189,388 @@ private fun TimetableScreen(
 }
 
 @Composable
-private fun TimetableChrome(
-    activeStudent: Student?,
-    students: List<Student>,
-    onStudentSelected: (Student) -> Unit,
-    onBack: () -> Unit,
+private fun TimetableHeader(
+    displayedWeek: WeekRange,
+    selectedDate: LocalDate,
+    onPreviousWeek: () -> Unit,
+    onNextWeek: () -> Unit,
+    onToday: () -> Unit,
+    onDayClick: (LocalDate) -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
+    val todayTarget = initialTimetableDate()
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(horizontal = spacing.lg, vertical = spacing.sm),
-        verticalArrangement = Arrangement.spacedBy(spacing.xs),
-    ) {
-        TextButton(onClick = onBack) {
-            Text("Wróć")
+    Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
+        Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Plan lekcji",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                ) {
+                    TextButton(
+                        onClick = onToday,
+                        border = BorderStroke(
+                            1.dp,
+                            when {
+                                selectedDate != todayTarget -> MaterialTheme.colorScheme.primary
+                                else -> Color.Transparent
+                            }
+                        ),
+                        colors = ButtonDefaults.textButtonColors(
+                            containerColor = when {
+                                selectedDate != todayTarget -> MaterialTheme.colorScheme.primary
+                                else -> Color.Transparent
+                            },
+                            contentColor = when {
+                                selectedDate != todayTarget -> MaterialTheme.colorScheme.onPrimary
+                                else -> MaterialTheme.colorScheme.primary
+                            }
+                        )
+                    ) {
+                        Text("Dzisiaj")
+                    }
+                    }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onPreviousWeek) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = "Poprzedni tydzień",
+                    )
+                }
+                Text(
+                    text = displayedWeek.schoolWeekLabel(),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                IconButton(onClick = onNextWeek) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Następny tydzień",
+                    )
+                }
+            }
         }
-        StudentSwitcher(
-            activeStudent = activeStudent,
-            students = students,
-            onStudentSelected = onStudentSelected,
+
+        DaySelector(
+            week = displayedWeek,
+            selectedDate = selectedDate,
+            todayDate = todayTarget,
+            onDayClick = onDayClick,
         )
     }
 }
 
 @Composable
-private fun WeekNavigator(
-    weekLabel: String,
-    onPreviousWeek: () -> Unit,
-    onNextWeek: () -> Unit,
-    onCurrentWeek: () -> Unit,
-) {
-    val spacing = EDziennikTheme.spacing
-
-    Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(spacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedButton(onClick = onPreviousWeek) {
-                Text("‹")
-            }
-            Text(
-                text = weekLabel,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            OutlinedButton(onClick = onNextWeek) {
-                Text("›")
-            }
-        }
-        TextButton(onClick = onCurrentWeek) {
-            Text("Wróć do dzisiaj")
-        }
-    }
-}
-
-@Composable
-private fun TimetableList(
-    weekStart: LocalDate,
-    entries: List<TimetableEntry>,
-) {
-    val entriesByDate = entries.groupBy { it.date }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.xl),
-    ) {
-        items((0L..6L).map { weekStart.plusDays(it) }) { day ->
-            DaySection(
-                date = day,
-                entries = entriesByDate[day].orEmpty(),
-            )
-        }
-    }
-}
-
-@Composable
-private fun DaySection(
-    date: LocalDate,
-    entries: List<TimetableEntry>,
-) {
-    val spacing = EDziennikTheme.spacing
-    val isToday = date == LocalDate.now()
-
-    Column(verticalArrangement = Arrangement.spacedBy(spacing.md)) {
-        DayHeader(date = date, isToday = isToday)
-        if (entries.isEmpty()) {
-            Text(
-                text = "Nic zaplanowanego.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(spacing.md)) {
-                entries.forEachIndexed { index, entry ->
-                    TimetableRow(
-                        displayNumber = entry.lessonNumber ?: index + 1,
-                        entry = entry,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DayHeader(
-    date: LocalDate,
-    isToday: Boolean,
+private fun DaySelector(
+    week: WeekRange,
+    selectedDate: LocalDate,
+    todayDate: LocalDate,
+    onDayClick: (LocalDate) -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(spacing.sm),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = date.dayOfWeek.polishName(),
-                style = MaterialTheme.typography.titleMedium,
+        week.schoolDays().forEach { date ->
+            DaySelectorItem(
+                date = date,
+                selected = date == selectedDate,
+                today = date == todayDate,
+                onClick = { onDayClick(date) },
+                modifier = Modifier.weight(1f),
             )
-            Text(
-                text = date.format(dayFormatter),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (isToday) {
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                shape = CircleShape,
-            ) {
-                Text(
-                    text = "dzisiaj",
-                    modifier = Modifier.padding(horizontal = spacing.sm, vertical = spacing.xxs),
-                    style = MaterialTheme.typography.labelMedium,
-                )
+            if (date.dayOfWeek != DayOfWeek.FRIDAY) {
+                Spacer(modifier = Modifier.width(spacing.xs))
             }
         }
     }
 }
 
 @Composable
-private fun TimetableRow(
-    displayNumber: Int,
-    entry: TimetableEntry,
+private fun DaySelectorItem(
+    date: LocalDate,
+    selected: Boolean,
+    today: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
+    val spacing = EDziennikTheme.spacing
+    val container = when {
+        selected -> MaterialTheme.colorScheme.primary
+        else -> Color.Transparent
+    }
+    val content = when {
+        selected -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(container)
+            .clickable(onClick = onClick)
+            .padding(vertical = spacing.sm),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(spacing.xxs),
+    ) {
+        Text(
+            text = date.dayOfWeek.shortPolishName(),
+            style = MaterialTheme.typography.labelMedium,
+            color = content,
+            maxLines = 1,
+        )
+        Text(
+            text = date.dayOfMonth.toString(),
+            style = MaterialTheme.typography.titleSmall,
+            color = content,
+            maxLines = 1,
+        )
+        Box(
+            modifier = Modifier
+                .size(4.dp)
+                .clip(CircleShape)
+                .background(
+                    when {
+                        today && selected -> MaterialTheme.colorScheme.onPrimary
+                        today -> MaterialTheme.colorScheme.secondary
+                        else -> Color.Transparent
+                    },
+                ),
+        )
+    }
+}
+
+@Composable
+private fun DayPlanPage(
+    date: LocalDate,
+    entries: List<TimetableEntry>,
+) {
+    val spacing = EDziennikTheme.spacing
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(spacing.lg),
+    ) {
+        item {
+            Text(
+                text = "${date.dayOfWeek.polishName()} · ${date.dayMonthLabel()}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        if (entries.isEmpty()) {
+            item {
+                EmptyDay()
+            }
+        } else {
+            items(entries) { entry ->
+                TimetableRow(entry = entry)
+            }
+            item {
+                Spacer(modifier = Modifier.height(spacing.md))
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyDay() {
+    val spacing = EDziennikTheme.spacing
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = spacing.xl),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            text = "Brak lekcji tego dnia",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun TimetableRow(entry: TimetableEntry) {
     val spacing = EDziennikTheme.spacing
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(spacing.md),
     ) {
-        Column(
-            modifier = Modifier.width(64.dp),
-            horizontalAlignment = Alignment.Start,
-        ) {
-            Text(
-                text = entry.startTime.format(timeFormatter),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = entry.endTime.format(timeFormatter),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = displayNumber.toString(),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        Column(
+        TimeColumn(
+            startTime = entry.startTime,
+            endTime = entry.endTime,
+            lessonNumber = entry.displayLessonNumber(),
+        )
+        Timeline()
+        LessonColumn(
+            entry = entry,
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(spacing.xs),
-        ) {
-            Text(
-                text = entry.subject,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            LessonMeta(entry)
-            entry.changes.forEach { change ->
-                ChangeNote(change)
-            }
-        }
+        )
     }
 }
 
 @Composable
-private fun LessonMeta(entry: TimetableEntry) {
-    val details = listOfNotNull(
-        entry.room?.let { "sala $it" },
-        entry.teacher,
-    )
-
-    if (details.isNotEmpty()) {
+private fun TimeColumn(
+    startTime: LocalTime,
+    endTime: LocalTime,
+    lessonNumber: Int?,
+) {
+    Column(
+        modifier = Modifier.width(56.dp),
+        horizontalAlignment = Alignment.Start,
+    ) {
         Text(
-            text = details.joinToString(" · "),
+            text = startTime.format(timeFormatter),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = endTime.format(timeFormatter),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = lessonNumber?.toString().orEmpty(),
+            modifier = Modifier.widthIn(min = 28.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun Timeline() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(64.dp)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)),
+    )
+}
+
+@Composable
+private fun LessonColumn(
+    entry: TimetableEntry,
+    modifier: Modifier = Modifier,
+) {
+    val spacing = EDziennikTheme.spacing
+    val effectiveSubject = entry.changes.firstNotNullOfOrNull { it.subject } ?: entry.subject
+    val effectiveRoom = entry.changes.firstNotNullOfOrNull { it.room } ?: entry.room
+    val substitution = entry.changes.firstOrNull { it.isSubstitution }
+    val effectiveTeacher = substitution?.teacher ?: entry.changes.firstNotNullOfOrNull { it.teacher } ?: entry.teacher
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(spacing.xs),
+    ) {
+        Text(
+            text = effectiveSubject,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
+        effectiveTeacher?.let { teacher ->
+            Text(
+                text = teacher,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        effectiveRoom?.let { room ->
+            Text(
+                text = "sala $room",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        LessonChangeNotes(entry = entry, substitution = substitution)
     }
 }
 
 @Composable
-private fun ChangeNote(change: TimetableChange) {
+private fun LessonChangeNotes(
+    entry: TimetableEntry,
+    substitution: TimetableChange?,
+) {
     val spacing = EDziennikTheme.spacing
-    val text = if (change.isSubstitution) {
-        "Zastępstwo: ${change.teacher}"
-    } else {
-        listOfNotNull(
-            change.subject,
-            change.room?.let { "sala $it" },
-            change.teacher,
-            change.absenceInformation,
-        ).joinToString(" · ").ifBlank { "Zmiana w planie (${change.changeType})" }
+    val notes = buildList {
+        substitution?.let {
+            add(entry.teacher?.let { teacher -> "Zastępstwo: $teacher" } ?: "Zastępstwo")
+        }
+        entry.changes
+            .filterNot { it == substitution }
+            .mapNotNullTo(this) { it.readableNote() }
     }
 
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f))
-            .padding(horizontal = spacing.sm, vertical = spacing.xs),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-        )
+    notes.forEach { note ->
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(spacing.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(5.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.tertiary),
+            )
+            Text(
+                text = note,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }
 
-private enum class TimetableContentMode {
-    Loading,
-    Error,
-    Empty,
-    Content,
-}
+private fun TimetableChange.readableNote(): String? =
+    listOfNotNull(
+        subject?.let { "zmieniony przedmiot: $it" },
+        room?.let { "sala $it" },
+        teacher?.let { "prowadzi $it" },
+        absenceInformation,
+    ).joinToString(" · ").ifBlank { null }
 
-private val TimetableUiState.contentMode: TimetableContentMode
-    get() = when {
-        isLoading -> TimetableContentMode.Loading
-        errorMessage != null -> TimetableContentMode.Error
-        isEmpty -> TimetableContentMode.Empty
-        else -> TimetableContentMode.Content
-    }
-
-private fun pl.katcz.edziennik.domain.time.WeekRange.label(): String =
-    "${start.format(weekFormatter)} - ${end.format(weekFormatter)}"
-
-private val weekFormatter = DateTimeFormatter.ofPattern("d MMMM", Locale.forLanguageTag("pl-PL"))
-private val dayFormatter = DateTimeFormatter.ofPattern("d MMMM", Locale.forLanguageTag("pl-PL"))
-private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-
-private fun DayOfWeek.polishName(): String =
+private fun DayOfWeek.shortPolishName(): String =
     when (this) {
-        DayOfWeek.MONDAY -> "Poniedziałek"
-        DayOfWeek.TUESDAY -> "Wtorek"
-        DayOfWeek.WEDNESDAY -> "Środa"
-        DayOfWeek.THURSDAY -> "Czwartek"
-        DayOfWeek.FRIDAY -> "Piątek"
-        DayOfWeek.SATURDAY -> "Sobota"
-        DayOfWeek.SUNDAY -> "Niedziela"
+        DayOfWeek.MONDAY -> "Pn"
+        DayOfWeek.TUESDAY -> "Wt"
+        DayOfWeek.WEDNESDAY -> "Śr"
+        DayOfWeek.THURSDAY -> "Czw"
+        DayOfWeek.FRIDAY -> "Pt"
+        DayOfWeek.SATURDAY -> "Sb"
+        DayOfWeek.SUNDAY -> "Nd"
     }
+
+private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")

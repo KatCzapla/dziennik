@@ -1,12 +1,19 @@
 package pl.katcz.edziennik.ui.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,6 +23,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import pl.katcz.edziennik.domain.Student
 import pl.katcz.edziennik.ui.theme.EDziennikTheme
 
@@ -30,33 +39,30 @@ fun StudentSwitcher(
     val spacing = EDziennikTheme.spacing
     val canSwitch = activeStudent != null && students.size > 1
 
-    Column(modifier = modifier) {
+    Box(modifier = modifier) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
+                .align(Alignment.CenterEnd)
+                .widthIn(max = 248.dp)
+                .defaultMinSize(minHeight = 48.dp)
                 .clickable(enabled = canSwitch) { expanded = true }
-                .padding(vertical = spacing.xs),
+                .padding(horizontal = spacing.xs, vertical = spacing.xs),
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = activeStudent?.name ?: "UONET+",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                activeStudent?.let { student ->
-                    Text(
-                        text = student.className,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            Text(
+                text = activeStudent?.name ?: "UONET+",
+                modifier = Modifier.weight(1f, fill = false),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             if (canSwitch) {
-                Text(
-                    text = "⌄",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Icon(
+                    imageVector = Icons.Filled.KeyboardArrowDown,
+                    contentDescription = "Zmień ucznia",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -64,18 +70,36 @@ fun StudentSwitcher(
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
+            modifier = Modifier.widthIn(min = 248.dp),
         ) {
             students.forEach { student ->
+                val selected = student == activeStudent
                 DropdownMenuItem(
                     text = {
                         Column {
-                            Text(student.name)
                             Text(
-                                text = student.className,
+                                text = student.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = student.detailsLabel(),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
+                    },
+                    leadingIcon = if (selected) {
+                        {
+                            Icon(
+                                imageVector = Icons.Filled.Check,
+                                contentDescription = "Aktualny uczeń",
+                            )
+                        }
+                    } else {
+                        null
                     },
                     onClick = {
                         expanded = false
@@ -86,3 +110,8 @@ fun StudentSwitcher(
         }
     }
 }
+
+private fun Student.detailsLabel(): String =
+    listOf(className, schoolName)
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")

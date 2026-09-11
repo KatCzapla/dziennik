@@ -13,6 +13,7 @@ import pl.katcz.edziennik.domain.Student
 import pl.katcz.edziennik.domain.TimetableEntry
 import pl.katcz.edziennik.repository.TimetableRepository
 import java.time.LocalDate
+import java.time.LocalTime
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TimetableViewModelTest {
@@ -47,6 +48,101 @@ class TimetableViewModelTest {
         assertEquals(null, viewModel.uiState.value.errorMessage)
     }
 
+    @Test
+    fun changingDayInsideLoadedWeekDoesNotReloadTimetable() = runTest {
+        val activeStudentManager = ActiveStudentManager()
+        val repository = FakeTimetableRepository()
+        val viewModel = TimetableViewModel(repository, activeStudentManager)
+
+        activeStudentManager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        val currentWeek = viewModel.uiState.value.displayedWeek
+
+        viewModel.selectDate(currentWeek.start.plusDays(2))
+        advanceUntilIdle()
+
+        assertEquals(1, repository.requests.size)
+    }
+
+    @Test
+    fun changingToNextWeekReloadsTimetable() = runTest {
+        val activeStudentManager = ActiveStudentManager()
+        val repository = FakeTimetableRepository()
+        val viewModel = TimetableViewModel(repository, activeStudentManager)
+
+        activeStudentManager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        viewModel.selectDate(viewModel.uiState.value.displayedWeek.next().start)
+        advanceUntilIdle()
+
+        assertEquals(2, repository.requests.size)
+    }
+
+    @Test
+    fun previousWeekKeepsCorrespondingSchoolDayAndReloadsTimetable() = runTest {
+        val activeStudentManager = ActiveStudentManager()
+        val repository = FakeTimetableRepository()
+        val viewModel = TimetableViewModel(repository, activeStudentManager)
+
+        activeStudentManager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        val selectedDate = viewModel.uiState.value.selectedDate
+        viewModel.previousWeek()
+        advanceUntilIdle()
+
+        assertEquals(selectedDate.minusWeeks(1), viewModel.uiState.value.selectedDate)
+        assertEquals(2, repository.requests.size)
+    }
+
+    @Test
+    fun nextWeekKeepsCorrespondingSchoolDayAndReloadsTimetable() = runTest {
+        val activeStudentManager = ActiveStudentManager()
+        val repository = FakeTimetableRepository()
+        val viewModel = TimetableViewModel(repository, activeStudentManager)
+
+        activeStudentManager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        val selectedDate = viewModel.uiState.value.selectedDate
+        viewModel.nextWeek()
+        advanceUntilIdle()
+
+        assertEquals(selectedDate.plusWeeks(1), viewModel.uiState.value.selectedDate)
+        assertEquals(2, repository.requests.size)
+    }
+
+    @Test
+    fun activeStudentChangeReloadsDisplayedWeekWithoutChangingSelectedDate() = runTest {
+        val activeStudentManager = ActiveStudentManager()
+        val repository = FakeTimetableRepository()
+        val viewModel = TimetableViewModel(repository, activeStudentManager)
+
+        activeStudentManager.initialize(listOf(firstStudent, secondStudent))
+        activeStudentManager.setActiveStudent(firstStudent)
+        advanceUntilIdle()
+        val selectedDate = viewModel.uiState.value.displayedWeek.start.plusDays(2)
+        viewModel.selectDate(selectedDate)
+        advanceUntilIdle()
+        activeStudentManager.setActiveStudent(secondStudent)
+        advanceUntilIdle()
+
+        assertEquals(selectedDate, viewModel.uiState.value.selectedDate)
+        assertEquals(2, repository.requests.size)
+    }
+
+    @Test
+    fun uiStateFiltersEntriesForSelectedDate() {
+        val selectedDate = LocalDate.of(2026, 9, 9)
+        val state = TimetableUiState(
+            selectedDate = selectedDate,
+            entries = listOf(
+                timetableEntry(date = selectedDate.minusDays(1)),
+                timetableEntry(date = selectedDate),
+            ),
+        )
+
+        assertEquals(listOf(timetableEntry(date = selectedDate)), state.selectedDayEntries)
+    }
+
     private class FakeTimetableRepository : TimetableRepository {
         val requests = mutableListOf<Pair<LocalDate, LocalDate>>()
 
@@ -71,6 +167,17 @@ class TimetableViewModelTest {
             name = "Anna Nowak",
             className = "2B",
             schoolName = "Szkola",
+        )
+
+        fun timetableEntry(date: LocalDate) = TimetableEntry(
+            date = date,
+            lessonNumber = null,
+            startTime = LocalTime.of(8, 0),
+            endTime = LocalTime.of(8, 45),
+            subject = "Matematyka",
+            teacher = "Jan Kowalski",
+            room = "14",
+            changes = emptyList(),
         )
     }
 }

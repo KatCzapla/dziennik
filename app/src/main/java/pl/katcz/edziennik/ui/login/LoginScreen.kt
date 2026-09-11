@@ -16,10 +16,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,11 +33,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import pl.katcz.edziennik.domain.Student
 import pl.katcz.edziennik.ui.components.EmptyState
@@ -129,10 +140,11 @@ private fun HomeChrome(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = spacing.lg, vertical = spacing.sm),
-        horizontalArrangement = Arrangement.spacedBy(spacing.md),
+            .padding(horizontal = spacing.sm, vertical = spacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Spacer(modifier = Modifier.weight(1f))
         StudentSwitcher(
             activeStudent = activeStudent,
             students = students,
@@ -230,7 +242,7 @@ private fun StudentPickerContent(
                     onClick = { onStudentSelected(student) },
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                    shape = MaterialTheme.shapes.medium,
+                    shape = MaterialTheme.shapes.small,
                 ) {
                     Column(
                         modifier = Modifier.padding(spacing.md),
@@ -265,6 +277,7 @@ private fun LoginForm(
     onSubmit: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
+    var passwordVisible by remember { mutableStateOf(false) }
 
     ScreenColumn(verticalArrangement = Arrangement.spacedBy(spacing.lg)) {
         Spacer(modifier = Modifier.height(spacing.xl))
@@ -274,8 +287,8 @@ private fun LoginForm(
                 style = MaterialTheme.typography.headlineMedium,
             )
             Text(
-                text = "Sprawdź plan i szkolne sprawy bez przedzierania się przez portal.",
-                style = MaterialTheme.typography.bodyLarge,
+                text = "Zaloguj się do swojego konta UONET+",
+                style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -288,6 +301,8 @@ private fun LoginForm(
                 enabled = !state.isLoading,
                 singleLine = true,
                 label = { Text("Login") },
+                shape = MaterialTheme.shapes.small,
+                colors = loginTextFieldColors(),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Email,
                     imeAction = ImeAction.Next,
@@ -301,7 +316,29 @@ private fun LoginForm(
                 enabled = !state.isLoading,
                 singleLine = true,
                 label = { Text("Hasło") },
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (passwordVisible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(
+                            imageVector = if (passwordVisible) {
+                                Icons.Filled.VisibilityOff
+                            } else {
+                                Icons.Filled.Visibility
+                            },
+                            contentDescription = if (passwordVisible) {
+                                "Ukryj hasło"
+                            } else {
+                                "Pokaż hasło"
+                            },
+                        )
+                    }
+                },
+                shape = MaterialTheme.shapes.small,
+                colors = loginTextFieldColors(),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Done,
@@ -318,10 +355,19 @@ private fun LoginForm(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = state.canSubmit,
             ) {
-                Text(if (state.isLoading) "Logowanie..." else "Zaloguj")
+                if (state.isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(end = spacing.sm)
+                            .height(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+                Text("Zaloguj się")
             }
             Text(
-                text = "Login i hasło służą tylko do bieżącego logowania.",
+                text = "Dane logowania nie są zapisywane w aplikacji.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -354,6 +400,14 @@ private fun LoginErrorText(message: String) {
         message = message,
     )
 }
+
+@Composable
+private fun loginTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = MaterialTheme.colorScheme.primary,
+    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.65f),
+    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f),
+    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f),
+)
 
 private enum class LoginScreenMode {
     CheckingSession,

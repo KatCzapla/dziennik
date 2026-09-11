@@ -12,6 +12,7 @@ import pl.katcz.edziennik.domain.ActiveStudentManager
 import pl.katcz.edziennik.domain.Student
 import pl.katcz.edziennik.domain.time.WeekRange
 import pl.katcz.edziennik.repository.TimetableRepository
+import java.time.LocalDate
 import javax.inject.Inject
 
 @HiltViewModel
@@ -21,6 +22,7 @@ class TimetableViewModel @Inject constructor(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(TimetableUiState())
     val uiState: StateFlow<TimetableUiState> = _uiState.asStateFlow()
+    private var loadedWeek: WeekRange? = null
 
     init {
         observeStudents()
@@ -28,18 +30,24 @@ class TimetableViewModel @Inject constructor(
     }
 
     fun previousWeek() {
-        _uiState.update { state -> state.copy(week = state.week.previous()) }
-        loadTimetable()
+        selectDate(_uiState.value.selectedDate.minusWeeks(1))
     }
 
     fun nextWeek() {
-        _uiState.update { state -> state.copy(week = state.week.next()) }
-        loadTimetable()
+        selectDate(_uiState.value.selectedDate.plusWeeks(1))
     }
 
     fun currentWeek() {
-        _uiState.update { state -> state.copy(week = WeekRange.current()) }
-        loadTimetable()
+        selectDate(initialTimetableDate())
+    }
+
+    fun selectDate(date: LocalDate) {
+        val normalizedDate = initialTimetableDate(date)
+        val previousWeek = _uiState.value.displayedWeek
+        _uiState.update { state -> state.copy(selectedDate = normalizedDate) }
+        if (WeekRange.fromDate(normalizedDate) != previousWeek) {
+            loadTimetable()
+        }
     }
 
     fun selectStudent(student: Student) {
@@ -73,6 +81,7 @@ class TimetableViewModel @Inject constructor(
                     )
                 }
                 if (student != null) {
+                    loadedWeek = null
                     loadTimetable()
                 }
             }
@@ -92,7 +101,10 @@ class TimetableViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            val week = _uiState.value.week
+            val week = _uiState.value.displayedWeek
+            if (loadedWeek == week) {
+                return@launch
+            }
             _uiState.update { state ->
                 state.copy(
                     isLoading = true,
@@ -113,6 +125,7 @@ class TimetableViewModel @Inject constructor(
                         errorMessage = null,
                     )
                 }
+                loadedWeek = week
             }.onFailure { error ->
                 _uiState.update { state ->
                     state.copy(
@@ -121,6 +134,7 @@ class TimetableViewModel @Inject constructor(
                         errorMessage = error.toTimetableErrorMessage(),
                     )
                 }
+                loadedWeek = null
             }
         }
     }
