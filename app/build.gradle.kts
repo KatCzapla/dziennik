@@ -7,14 +7,14 @@ plugins {
 }
 
 android {
-    namespace = "pl.katcz.edziennik"
+    namespace = "pl.usagi.edziennik"
 
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "pl.katcz.edziennik"
+        applicationId = "pl.usagi.edziennik"
         minSdk = 26
         targetSdk = 37
         versionCode = 1
