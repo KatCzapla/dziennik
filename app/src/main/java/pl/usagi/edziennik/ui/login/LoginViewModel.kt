@@ -3,6 +3,7 @@ package pl.usagi.edziennik.ui.login
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,13 +14,23 @@ import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.network.credentials.CredentialStore
 import pl.usagi.edziennik.network.credentials.StoredCredentials
 import pl.usagi.edziennik.network.session.AutoLoginSettings
+import pl.usagi.edziennik.network.session.AutoDetectLogin
+import pl.usagi.edziennik.network.session.AutoDetectLoginResult
+import pl.usagi.edziennik.network.session.AuthenticationException
+import pl.usagi.edziennik.network.session.AuthenticationProvider
+import pl.usagi.edziennik.network.session.CurrentAuthenticationSession
 import pl.usagi.edziennik.network.session.SessionManager
+import pl.usagi.edziennik.network.session.toLoggedInUser
+import pl.usagi.edziennik.repository.MessagesRepository
 import pl.usagi.edziennik.repository.StudentRepository
 import javax.inject.Inject
 
 @HiltViewModel
 class LoginViewModel @Inject constructor(
     private val sessionManager: SessionManager,
+    private val autoDetectLogin: AutoDetectLogin,
+    private val currentSession: CurrentAuthenticationSession,
+    private val messagesRepository: MessagesRepository,
     private val credentialStore: CredentialStore,
     private val autoLoginSettings: AutoLoginSettings,
     private val studentRepository: StudentRepository,
@@ -30,6 +41,7 @@ class LoginViewModel @Inject constructor(
 
     init {
         observeActiveStudent()
+        observeLoggedInUser()
         checkPersistedSession()
     }
 
@@ -64,19 +76,23 @@ class LoginViewModel @Inject constructor(
                 )
             }
 
-            val result = sessionManager.login(
+            currentSession.clear()
+            val result = autoDetectLogin.authenticate(
                 username = credentials.login,
                 password = credentials.password,
             )
 
-            result.fold(
-                onSuccess = {
+            when (result) {
+                is AutoDetectLoginResult.Success -> {
+                    currentSession.activate(result)
                     val isValid = sessionManager.isSessionValid()
+                    if (!isValid) currentSession.clear()
                     val credentialErrorMessage = if (isValid) {
                         persistCredentialsAfterSuccessfulLogin(
                             username = credentials.login,
                             password = credentials.password,
                             rememberCredentials = credentials.rememberCredentials,
+                            provider = result.provider,
                         )
                     } else {
                         null
@@ -90,19 +106,26 @@ class LoginViewModel @Inject constructor(
                         )
                     }
                     if (isValid) {
+                        loadLoggedInUser()
                         loadStudents()
                     }
-                },
-                onFailure = { error ->
+                }
+                AutoDetectLoginResult.InvalidCredentials,
+                AutoDetectLoginResult.TechnicalError -> {
+                    val message = if (result == AutoDetectLoginResult.InvalidCredentials) {
+                        AuthenticationException.InvalidCredentials().toLoginErrorMessage()
+                    } else {
+                        "Proces logowania UONET+ nie zakończył się poprawnie."
+                    }
                     _uiState.update { state ->
                         state.copy(
                             isLoading = false,
                             isSessionValid = false,
-                            errorMessage = error.toLoginErrorMessage(),
+                            errorMessage = message,
                         )
                     }
-                },
-            )
+                }
+            }
         }
     }
 
@@ -116,7 +139,9 @@ class LoginViewModel @Inject constructor(
     fun clearSession() {
         viewModelScope.launch {
             sessionManager.clearSession()
+            currentSession.clear()
             autoLoginSettings.setAutoLoginEnabled(false)
+            autoLoginSettings.setAuthenticationProvider(null)
             activeStudentManager.clear()
             _uiState.update {
                 LoginUiState(
@@ -131,6 +156,7 @@ class LoginViewModel @Inject constructor(
         viewModelScope.launch {
             credentialStore.clear()
             autoLoginSettings.setAutoLoginEnabled(false)
+            autoLoginSettings.setAuthenticationProvider(null)
             _uiState.update { state ->
                 state.copy(rememberCredentials = false)
             }
@@ -139,8 +165,14 @@ class LoginViewModel @Inject constructor(
 
     private fun checkPersistedSession() {
         viewModelScope.launch {
+            val savedProvider = autoLoginSettings.getAuthenticationProvider()
+            currentSession.restore(savedProvider ?: AuthenticationProvider.PROJECT_UONET)
             val isValid = sessionManager.validatePersistedSession()
             if (isValid) {
+                if (savedProvider == null) {
+                    autoLoginSettings.setAuthenticationProvider(AuthenticationProvider.PROJECT_UONET)
+                }
+                loadLoggedInUser()
                 _uiState.update { state ->
                     state.copy(
                         isCheckingSession = false,
@@ -151,6 +183,8 @@ class LoginViewModel @Inject constructor(
                 loadStudents()
                 return@launch
             }
+
+            currentSession.clear()
 
             if (!autoLoginSettings.isAutoLoginEnabled()) {
                 _uiState.update { state ->
@@ -182,7 +216,8 @@ class LoginViewModel @Inject constructor(
                 state.copy(rememberCredentials = true)
             }
 
-            val renewed = renewSession(storedCredentials)
+            if (savedProvider == null) autoLoginSettings.setAutoLoginEnabled(false)
+            val renewed = savedProvider?.let { renewSession(storedCredentials, it) } ?: false
             _uiState.update { state ->
                 state.copy(
                     isCheckingSession = false,
@@ -195,26 +230,38 @@ class LoginViewModel @Inject constructor(
                 )
             }
             if (renewed) {
+                loadLoggedInUser()
                 loadStudents()
             }
         }
     }
 
-    private suspend fun renewSession(credentials: StoredCredentials): Boolean {
-        val loginResult = sessionManager.login(
+    private suspend fun renewSession(
+        credentials: StoredCredentials,
+        provider: AuthenticationProvider,
+    ): Boolean {
+        val result = autoDetectLogin.authenticateWithProvider(
+            provider = provider,
             username = credentials.username,
             password = credentials.password,
         )
-        return loginResult.isSuccess && sessionManager.isSessionValid()
+        if (result !is AutoDetectLoginResult.Success) return false
+        currentSession.activate(result)
+        val isValid = sessionManager.isSessionValid()
+        if (!isValid) sessionManager.clearSession()
+        return isValid
     }
 
     private suspend fun persistCredentialsAfterSuccessfulLogin(
         username: String,
         password: String,
         rememberCredentials: Boolean,
+        provider: AuthenticationProvider,
     ): String? =
         if (rememberCredentials) {
             runCatching {
+                autoLoginSettings.setAutoLoginEnabled(false)
+                autoLoginSettings.setAuthenticationProvider(provider)
                 credentialStore.save(
                     username = username,
                     password = password,
@@ -227,6 +274,7 @@ class LoginViewModel @Inject constructor(
         } else {
             runCatching {
                 autoLoginSettings.setAutoLoginEnabled(false)
+                autoLoginSettings.setAuthenticationProvider(provider)
             }.fold(
                 onSuccess = { null },
                 onFailure = { "Zalogowano, ale nie udało się zaktualizować ustawień automatycznego logowania." },
@@ -240,6 +288,28 @@ class LoginViewModel @Inject constructor(
                     state.copy(activeStudent = student)
                 }
             }
+        }
+    }
+
+    private fun observeLoggedInUser() {
+        viewModelScope.launch {
+            currentSession.loggedInUser.collect { user ->
+                _uiState.update { state -> state.copy(loggedInUser = user) }
+            }
+        }
+    }
+
+    private fun loadLoggedInUser() {
+        val generation = currentSession.generation()
+        viewModelScope.launch {
+            val user = try {
+                messagesRepository.getMailboxes().toLoggedInUser()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                null
+            }
+            if (user != null) currentSession.setLoggedInUserIfCurrent(generation, user)
         }
     }
 

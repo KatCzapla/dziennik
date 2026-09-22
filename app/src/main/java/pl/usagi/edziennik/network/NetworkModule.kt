@@ -11,8 +11,11 @@ import okhttp3.OkHttpClient
 import pl.usagi.edziennik.network.credentials.AndroidKeystoreCredentialStore
 import pl.usagi.edziennik.network.credentials.CredentialStore
 import pl.usagi.edziennik.network.cookie.PersistentCookieJar
+import pl.usagi.edziennik.network.eduvulcan.EduVulcanLogin
 import pl.usagi.edziennik.network.html.UonetHtmlFormParser
+import pl.usagi.edziennik.network.session.AutoDetectLogin
 import pl.usagi.edziennik.network.session.AutoLoginSettings
+import pl.usagi.edziennik.network.session.CurrentAuthenticationSession
 import pl.usagi.edziennik.network.session.SessionManager
 import pl.usagi.edziennik.network.session.SharedPreferencesAutoLoginSettings
 import pl.usagi.edziennik.network.session.UonetSessionManager
@@ -50,6 +53,24 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    fun provideCurrentAuthenticationSession(cookieJar: PersistentCookieJar): CurrentAuthenticationSession =
+        CurrentAuthenticationSession(cookieJar)
+
+    @Provides
+    fun provideEduVulcanLogin(
+        okHttpClient: OkHttpClient,
+        json: Json,
+        cookieJar: PersistentCookieJar,
+    ): EduVulcanLogin = EduVulcanLogin(okHttpClient, json, cookieJar)
+
+    @Provides
+    fun provideAutoDetectLogin(
+        eduVulcanLogin: EduVulcanLogin,
+        projectUonetSessionManager: UonetSessionManager,
+    ): AutoDetectLogin = AutoDetectLogin(eduVulcanLogin, projectUonetSessionManager)
+
+    @Provides
+    @Singleton
     fun provideCredentialStore(
         credentialStore: AndroidKeystoreCredentialStore,
     ): CredentialStore = credentialStore
@@ -68,11 +89,11 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(cookieJar: PersistentCookieJar): OkHttpClient =
+    fun provideOkHttpClient(currentSession: CurrentAuthenticationSession): OkHttpClient =
         OkHttpClient.Builder()
-            .cookieJar(cookieJar)
+            .cookieJar(currentSession)
             .addInterceptor { chain ->
-                val request = chain.request()
+                val request = currentSession.route(chain.request())
                     .newBuilder()
                     .header("User-Agent", USER_AGENT)
                     .build()

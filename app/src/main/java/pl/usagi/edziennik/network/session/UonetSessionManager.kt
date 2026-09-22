@@ -21,6 +21,7 @@ import javax.inject.Singleton
 class UonetSessionManager @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val cookieJar: PersistentCookieJar,
+    private val currentSession: CurrentAuthenticationSession,
     private val htmlFormParser: UonetHtmlFormParser,
     private val wsFederationNavigator: WsFederationNavigator,
     private val messagesSessionStore: MessagesSessionStore,
@@ -97,6 +98,7 @@ class UonetSessionManager @Inject constructor(
     }
 
     override suspend fun clearSession() = withContext(Dispatchers.IO) {
+        currentSession.clear()
         cookieJar.clear()
         messagesSessionStore.clear()
     }

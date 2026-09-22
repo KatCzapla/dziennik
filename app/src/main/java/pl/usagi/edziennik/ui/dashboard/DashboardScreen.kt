@@ -45,12 +45,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.network.messages.MessagesDiagnostics
+import pl.usagi.edziennik.network.session.LoggedInUser
 import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.messages.dashboardUnreadBadgeLabel
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 
 @Composable
 fun DashboardRoute(
+    loggedInUser: LoggedInUser?,
     onOpenTimetable: () -> Unit,
     onOpenAttendance: () -> Unit,
     onOpenGrades: () -> Unit,
@@ -63,6 +66,7 @@ fun DashboardRoute(
 
     DashboardScreen(
         state = state,
+        loggedInUser = loggedInUser,
         onStudentSelected = viewModel::selectStudent,
         onShowTodayTimetable = viewModel::showTodayTimetable,
         onShowTomorrowTimetable = viewModel::showTomorrowTimetable,
@@ -78,6 +82,7 @@ fun DashboardRoute(
 @Composable
 private fun DashboardScreen(
     state: DashboardUiState,
+    loggedInUser: LoggedInUser?,
     onStudentSelected: (Student) -> Unit,
     onShowTodayTimetable: () -> Unit,
     onShowTomorrowTimetable: () -> Unit,
@@ -89,6 +94,8 @@ private fun DashboardScreen(
     onLogout: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
+
+    MessagesDiagnostics.debug("Logged user: ${loggedInUser}")
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -116,7 +123,7 @@ private fun DashboardScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(spacing.xs)) {
                     Spacer(modifier = Modifier.height(spacing.sm))
                     Text(
-                        text = "Dzień dobry",
+                        text = dashboardGreeting(loggedInUser?.name),
                         style = MaterialTheme.typography.headlineMedium,
                         color = MaterialTheme.colorScheme.onBackground,
                     )

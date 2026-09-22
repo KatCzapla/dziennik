@@ -25,6 +25,17 @@ import java.time.LocalTime
 
 class DashboardPresentationTest {
     @Test
+    fun greetingUsesLoggedInUserName() {
+        assertEquals("Dzień dobry, Karolina", dashboardGreeting(" Kowalska-Nowak Karolina "))
+    }
+
+    @Test
+    fun greetingWithoutNameDoesNotShowEmptyName() {
+        assertEquals("Dzień dobry", dashboardGreeting(null))
+        assertEquals("Dzień dobry", dashboardGreeting("  "))
+    }
+
+    @Test
     fun todaysLessonsArePresentedChronologically() {
         val date = LocalDate.of(2026, 9, 14)
         val lessons = listOf(

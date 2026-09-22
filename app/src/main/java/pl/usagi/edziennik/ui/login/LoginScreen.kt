@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.network.messages.MessagesDiagnostics
 import pl.usagi.edziennik.ui.components.EmptyState
 import pl.usagi.edziennik.ui.components.QuietLoadingState
 import pl.usagi.edziennik.ui.components.StudentSwitcher
@@ -123,6 +124,7 @@ private fun LoginScreen(
                     LoginScreenMode.CheckingSession -> CheckingSessionContent()
                     LoginScreenMode.LoadingStudents -> LoadingStudentsContent()
                     LoginScreenMode.Home -> DashboardRoute(
+                        loggedInUser = state.loggedInUser,
                         onOpenTimetable = onOpenTimetable,
                         onOpenAttendance = onOpenAttendance,
                         onOpenGrades = onOpenGrades,

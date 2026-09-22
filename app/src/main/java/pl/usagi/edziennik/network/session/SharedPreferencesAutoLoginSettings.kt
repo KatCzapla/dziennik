@@ -23,9 +23,22 @@ class SharedPreferencesAutoLoginSettings @Inject constructor(
             .apply()
     }
 
+    override suspend fun getAuthenticationProvider(): AuthenticationProvider? = withContext(Dispatchers.IO) {
+        preferences.getString(AUTHENTICATION_PROVIDER_KEY, null)
+            ?.let { stored -> AuthenticationProvider.entries.firstOrNull { it.name == stored } }
+    }
+
+    override suspend fun setAuthenticationProvider(provider: AuthenticationProvider?) = withContext(Dispatchers.IO) {
+        preferences.edit().apply {
+            if (provider == null) remove(AUTHENTICATION_PROVIDER_KEY)
+            else putString(AUTHENTICATION_PROVIDER_KEY, provider.name)
+        }.apply()
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "auto_login_settings"
         const val AUTO_LOGIN_ENABLED_KEY = "auto_login_enabled"
+        const val AUTHENTICATION_PROVIDER_KEY = "authentication_provider"
         const val DEFAULT_AUTO_LOGIN_ENABLED = false
     }
 }

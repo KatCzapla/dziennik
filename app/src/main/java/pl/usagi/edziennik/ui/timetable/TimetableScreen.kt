@@ -525,7 +525,7 @@ private fun LessonColumn(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        if (entry.isCancelled) {
+    if (entry.isCancelled) {
             Text(
                 text = "Odwołane",
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
@@ -533,13 +533,25 @@ private fun LessonColumn(
                 maxLines = 1,
             )
             entry.cancellationReason?.let { reason ->
-                Text(
-                    text = reason,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(spacing.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.tertiary),
+                    )
+                    Text(
+                        text = reason,
+                        style = MaterialTheme.typography.bodyMedium,
+    //                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
         if (!entry.isCancelled) effectiveTeacher?.let { teacher ->
@@ -551,7 +563,7 @@ private fun LessonColumn(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        effectiveRoom?.let { room ->
+        if (!entry.isCancelled) effectiveRoom?.let { room ->
             Text(
                 text = "sala $room",
                 style = MaterialTheme.typography.bodyMedium,

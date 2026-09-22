@@ -17,6 +17,14 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 
+fun dashboardGreeting(name: String?): String =
+    name?.trim()
+        ?.split(Regex("\\s+"))
+        ?.getOrNull(1)
+        ?.takeIf(String::isNotEmpty)
+        ?.let { "Dzień dobry, $it" }
+        ?: "Dzień dobry"
+
 data class DashboardLesson(
     val startTime: String,
     val subject: String,

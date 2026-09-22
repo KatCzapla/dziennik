@@ -1,6 +1,7 @@
 package pl.usagi.edziennik.ui.login
 
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.network.session.LoggedInUser
 
 data class LoginUiState(
     val login: String = "",
@@ -12,6 +13,7 @@ data class LoginUiState(
     val isSessionValid: Boolean = false,
     val students: List<Student> = emptyList(),
     val activeStudent: Student? = null,
+    val loggedInUser: LoggedInUser? = null,
     val errorMessage: String? = null,
 ) {
     val canSubmit: Boolean
