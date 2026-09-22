@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="edziennik_dark_background">#12181C</color>
+    <color name="edziennik_primary">#0B7285</color>
+    <color name="edziennik_dark_primary">#75D4E2</color>
+    <color name="edziennik_dark_primary_container">#064E5C</color>
+    <color name="edziennik_dark_on_background">#E7EEF0</color>
+    <color name="edziennik_dark_secondary">#FFB86A</color>
+    <color name="edziennik_light_primary_container">#D5F2F5</color>
+</resources>

@@ -5,9 +5,36 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#1D4ED8"
-        android:pathData="M0,0h108v108h-108z" />
+        android:fillColor="@color/edziennik_dark_primary_container"
+        android:pathData="M26,31C36,28 45,30 52,36L52,80C45,74 36,72 26,75Z" />
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M30,27h48c3.3,0 6,2.7 6,6v42c0,3.3 -2.7,6 -6,6h-48c-3.3,0 -6,-2.7 -6,-6v-42c0,-3.3 2.7,-6 6,-6zM34,41v6h40v-6zM34,55v6h28v-6zM34,69v6h18v-6z" />
+        android:fillColor="@color/edziennik_primary"
+        android:pathData="M56,36C63,30 72,28 82,31L82,75C72,72 63,74 56,80Z" />
+    <path
+        android:fillColor="@color/edziennik_light_primary_container"
+        android:pathData="M31,34C39,33 46,35 51,40L51,73C45,69 38,68 31,70Z" />
+    <path
+        android:fillColor="@color/edziennik_dark_on_background"
+        android:pathData="M57,40C62,35 69,33 77,34L77,70C70,68 63,69 57,73Z" />
+    <path
+        android:fillColor="@color/edziennik_dark_primary"
+        android:pathData="M52,36H56V80H52Z" />
+    <path
+        android:fillColor="@color/edziennik_primary"
+        android:pathData="M36,45H47V48H36Z" />
+    <path
+        android:fillColor="@color/edziennik_primary"
+        android:pathData="M36,54H47V57H36Z" />
+    <path
+        android:fillColor="@color/edziennik_primary"
+        android:pathData="M36,63H44V66H36Z" />
+    <path
+        android:fillColor="@color/edziennik_dark_primary_container"
+        android:pathData="M62,45H73V48H62Z" />
+    <path
+        android:fillColor="@color/edziennik_dark_primary_container"
+        android:pathData="M62,54H73V57H62Z" />
+    <path
+        android:fillColor="@color/edziennik_dark_secondary"
+        android:pathData="M70,61m-4,0a4,4 0,1 0,8 0a4,4 0,1 0,-8 0" />
 </vector>

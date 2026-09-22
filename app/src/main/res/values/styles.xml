@@ -1,7 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.EDziennik" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.EDziennik" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/edziennik_dark_background</item>
+        <item name="android:statusBarColor">@color/edziennik_dark_background</item>
+        <item name="android:navigationBarColor">@color/edziennik_dark_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
+    <style name="Theme.EDziennik.Splash" parent="Theme.EDziennik">
+        <item name="android:windowBackground">@drawable/splash_window_background</item>
     </style>
 </resources>
