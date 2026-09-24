@@ -34,3 +34,29 @@ data class AttendanceEntryDto(
     @SerialName("dataDo")
     val dateTo: String? = null,
 )
+
+@Serializable
+data class AttendanceSubjectDto(
+    @SerialName("nazwa") val name: String,
+    @SerialName("id") val id: Int,
+)
+
+@Serializable
+data class AttendanceStatisticsDto(
+    @SerialName("podsumowanie") val summary: Double? = null,
+    @SerialName("statystyki") val statistics: List<AttendanceCategoryStatisticsDto> = emptyList(),
+)
+
+@Serializable
+data class AttendanceCategoryStatisticsDto(
+    @SerialName("kategoriaFrekwencji") val attendanceCategory: Int? = null,
+    @SerialName("miesiace") val months: List<AttendanceMonthStatisticsDto> = emptyList(),
+    @SerialName("okresy") val periods: List<Int> = emptyList(),
+    @SerialName("razem") val total: Int? = null,
+)
+
+@Serializable
+data class AttendanceMonthStatisticsDto(
+    @SerialName("miesiac") val month: Int,
+    @SerialName("wartosc") val value: Int,
+)

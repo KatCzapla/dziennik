@@ -7,9 +7,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.domain.AttendanceSubject
 import pl.usagi.edziennik.domain.time.WeekRange
 import pl.usagi.edziennik.domain.time.clampedSchoolWeekEnd
 import pl.usagi.edziennik.domain.time.clampedSchoolWeekStart
@@ -40,6 +43,8 @@ class AttendanceViewModel @Inject constructor(
     )
     val uiState: StateFlow<AttendanceUiState> = _uiState.asStateFlow()
     private var loadedWeek: WeekRange? = null
+    private var loadedStatisticsSubjectId: Int? = null
+    private var statisticsJob: Job? = null
 
     init {
         observeStudents()
@@ -82,7 +87,28 @@ class AttendanceViewModel @Inject constructor(
     }
 
     fun retry() {
-        loadAttendance(force = true)
+        if (_uiState.value.view == AttendanceView.STATISTICS) {
+            loadStatistics(force = true)
+        } else {
+            loadAttendance(force = true)
+        }
+    }
+
+    fun selectView(view: AttendanceView) {
+        if (_uiState.value.view == view) return
+        _uiState.update { it.copy(view = view) }
+        if (view == AttendanceView.STATISTICS) loadStatistics()
+    }
+
+    fun selectSubject(subjectId: Int) {
+        if (subjectId == _uiState.value.selectedSubjectId ||
+            _uiState.value.subjects.none { it.id == subjectId }
+        ) return
+
+        _uiState.update {
+            it.copy(selectedSubjectId = subjectId, statistics = null, statisticsErrorMessage = null)
+        }
+        loadStatistics()
     }
 
     fun selectStudent(student: Student) {
@@ -100,10 +126,17 @@ class AttendanceViewModel @Inject constructor(
     private fun observeActiveStudent() {
         viewModelScope.launch {
             activeStudentManager.activeStudent.collect { student ->
+                statisticsJob?.cancel()
+                loadedStatisticsSubjectId = null
                 _uiState.update { state ->
                     state.copy(
                         activeStudent = student,
                         weekEntries = if (student == null) emptyList() else state.weekEntries,
+                        subjects = emptyList(),
+                        selectedSubjectId = -1,
+                        statistics = null,
+                        isStatisticsLoading = false,
+                        statisticsErrorMessage = null,
                         errorMessage = if (student == null) {
                             "Wybierz ucznia, aby zobaczyć frekwencję."
                         } else {
@@ -114,7 +147,52 @@ class AttendanceViewModel @Inject constructor(
                 if (student != null) {
                     loadedWeek = null
                     loadAttendance()
+                    if (_uiState.value.view == AttendanceView.STATISTICS) loadStatistics()
                 }
+            }
+        }
+    }
+
+    private fun loadStatistics(force: Boolean = false) {
+        if (_uiState.value.activeStudent == null) return
+        val subjectId = _uiState.value.selectedSubjectId
+        if (!force && loadedStatisticsSubjectId == subjectId) return
+
+        statisticsJob?.cancel()
+        statisticsJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(isStatisticsLoading = true, statisticsErrorMessage = null)
+            }
+            try {
+                if (_uiState.value.subjects.isEmpty()) {
+                    val subjects = attendanceRepository.getSubjects()
+                    val options = if (subjects.any { it.id == -1 }) {
+                        subjects
+                    } else {
+                        listOf(AttendanceSubject(-1, "Wszystkie")) + subjects
+                    }
+                    _uiState.update { it.copy(subjects = options) }
+                }
+                val statistics = attendanceRepository.getStatistics(subjectId)
+                _uiState.update {
+                    it.copy(
+                        statistics = statistics,
+                        isStatisticsLoading = false,
+                        statisticsErrorMessage = null,
+                    )
+                }
+                loadedStatisticsSubjectId = subjectId
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                _uiState.update {
+                    it.copy(
+                        statistics = null,
+                        isStatisticsLoading = false,
+                        statisticsErrorMessage = error.toAttendanceErrorMessage(),
+                    )
+                }
+                loadedStatisticsSubjectId = null
             }
         }
     }

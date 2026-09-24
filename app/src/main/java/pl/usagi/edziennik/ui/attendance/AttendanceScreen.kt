@@ -30,6 +30,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -86,6 +88,8 @@ fun AttendanceRoute(
         onToday = viewModel::today,
         onRetry = viewModel::retry,
         onStudentSelected = viewModel::selectStudent,
+        onViewSelected = viewModel::selectView,
+        onSubjectSelected = viewModel::selectSubject,
     )
 }
 
@@ -99,6 +103,8 @@ private fun AttendanceScreen(
     onToday: () -> Unit,
     onRetry: () -> Unit,
     onStudentSelected: (Student) -> Unit,
+    onViewSelected: (AttendanceView) -> Unit,
+    onSubjectSelected: (Int) -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
     val firstPagerDate = remember(state.schoolYearRange) {
@@ -149,59 +155,85 @@ private fun AttendanceScreen(
                 .padding(horizontal = spacing.lg),
             verticalArrangement = Arrangement.spacedBy(spacing.md),
         ) {
-            AttendanceHeader(
-                displayedWeek = state.displayedWeek,
-                selectedDate = state.selectedDate,
-                schoolYearRange = state.schoolYearRange,
-                latestSelectableDate = state.latestSelectableDate,
-                canGoPreviousWeek = state.canGoPreviousWeek,
-                canGoNextWeek = state.canGoNextWeek,
-                onPreviousWeek = onPreviousWeek,
-                onNextWeek = onNextWeek,
-                onToday = onToday,
-                onDayClick = { date ->
-                    coroutineScope.launch {
-                        selectableSchoolDateIndex(firstPagerDate, date)?.let { page ->
-                            pagerState.animateScrollToPage(page)
-                        }
-                    }
-                },
+            Text(
+                text = "Frekwencja",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
             )
 
-            if (state.errorMessage != null) {
-                ErrorState(
-                    title = "Nie udało się pobrać frekwencji",
-                    message = state.errorMessage,
-                    actionLabel = "Spróbuj ponownie",
-                    onAction = onRetry,
+            PrimaryTabRow(selectedTabIndex = state.view.ordinal) {
+                AttendanceView.entries.forEach { view ->
+                    Tab(
+                        selected = state.view == view,
+                        onClick = { onViewSelected(view) },
+                        text = {
+                            Text(if (view == AttendanceView.ENTRIES) "Dziennik" else "Statystyki")
+                        },
+                    )
+                }
+            }
+
+            if (state.view == AttendanceView.STATISTICS) {
+                AttendanceStatisticsContent(
+                    state = state,
+                    onSubjectSelected = onSubjectSelected,
+                    onRetry = onRetry,
+                    modifier = Modifier.weight(1f),
                 )
             } else {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    HorizontalPager(
-                        state = pagerState,
-                        modifier = Modifier.fillMaxSize(),
-                        beyondViewportPageCount = 1,
-                        key = { page -> selectableSchoolDateAt(firstPagerDate, page) },
-                    ) { page ->
-                        val pageDate = selectableSchoolDateAt(firstPagerDate, page)
-                        DayAttendancePage(
-                            date = pageDate,
-                            entries = if (pageDate == state.selectedDate) {
-                                state.selectedDayEntries
-                            } else {
-                                state.weekEntries.filter { it.date == pageDate }
-                            },
-                        )
-                    }
+                AttendanceJournalControls(
+                    displayedWeek = state.displayedWeek,
+                    selectedDate = state.selectedDate,
+                    schoolYearRange = state.schoolYearRange,
+                    latestSelectableDate = state.latestSelectableDate,
+                    canGoPreviousWeek = state.canGoPreviousWeek,
+                    canGoNextWeek = state.canGoNextWeek,
+                    onPreviousWeek = onPreviousWeek,
+                    onNextWeek = onNextWeek,
+                    onToday = onToday,
+                    onDayClick = { date ->
+                        coroutineScope.launch {
+                            selectableSchoolDateIndex(firstPagerDate, date)?.let { page ->
+                                pagerState.animateScrollToPage(page)
+                            }
+                        }
+                    },
+                )
+                if (state.errorMessage != null) {
+                    ErrorState(
+                        title = "Nie udało się pobrać frekwencji",
+                        message = state.errorMessage,
+                        actionLabel = "Spróbuj ponownie",
+                        onAction = onRetry,
+                    )
+                } else {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxSize(),
+                            beyondViewportPageCount = 1,
+                            key = { page -> selectableSchoolDateAt(firstPagerDate, page) },
+                        ) { page ->
+                            val pageDate = selectableSchoolDateAt(firstPagerDate, page)
+                            DayAttendancePage(
+                                date = pageDate,
+                                entries = if (pageDate == state.selectedDate) {
+                                    state.selectedDayEntries
+                                } else {
+                                    state.weekEntries.filter { it.date == pageDate }
+                                },
+                            )
+                        }
 
-                    if (state.isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .padding(top = spacing.sm)
-                                .size(22.dp),
-                            strokeWidth = 2.dp,
-                        )
+                        if (state.isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = spacing.sm)
+                                    .size(22.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        }
                     }
                 }
             }
@@ -210,7 +242,7 @@ private fun AttendanceScreen(
 }
 
 @Composable
-private fun AttendanceHeader(
+private fun AttendanceJournalControls(
     displayedWeek: WeekRange,
     selectedDate: LocalDate,
     schoolYearRange: pl.usagi.edziennik.domain.time.SchoolYearRange,
@@ -228,19 +260,11 @@ private fun AttendanceHeader(
     Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
         Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(40.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Frekwencja",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-
-                Box(
+                /*Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
                 ) {
@@ -266,7 +290,7 @@ private fun AttendanceHeader(
                     ) {
                         Text("Dzisiaj")
                     }
-                }
+                }*/
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -514,18 +538,12 @@ private fun AttendanceTimeline() {
     )
 }
 
-private fun AttendanceStatus.label(): String =
-    when (this) {
-        AttendanceStatus.Present -> "Obecność"
-        is AttendanceStatus.Unknown -> description ?: rawValue?.let { "Status: $it" }
-        ?: "Status nieznany"
-    }
-
 @Composable
 private fun AttendanceStatus.color() =
-    when (this) {
-        AttendanceStatus.Present -> MaterialTheme.colorScheme.primary
-        is AttendanceStatus.Unknown -> MaterialTheme.colorScheme.onSurfaceVariant
+    if (this == AttendanceStatus.Present) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
     }
 
 private fun DayOfWeek.shortPolishName(): String =

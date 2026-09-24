@@ -95,6 +95,23 @@ class TimetableMapperTest {
     }
 
     @Test
+    fun changeTypeOneMapsToCancelledLessonAndKeepsDetailInformation() {
+        val entry = timetableEntryDto(
+            changes = listOf(
+                TimetableChangeDto(
+                    changeType = 1,
+                    absenceInformation = "uczniowie zwolnieni do domu",
+                ),
+            ),
+        ).toDomain()
+
+        assertTrue(entry.isCancelled)
+        assertEquals(TimetableChangeKind.Cancelled, entry.changes.single().kind)
+        assertEquals("uczniowie zwolnieni do domu", entry.changes.single().absenceInformation)
+        assertEquals("uczniowie zwolnieni do domu", entry.cancellationReason)
+    }
+
+    @Test
     fun changeTypeFourWithoutReasonStillMapsToCancelledLesson() {
         val entry = timetableEntryDto(
             changes = listOf(TimetableChangeDto(changeType = 4, absenceInformation = null)),

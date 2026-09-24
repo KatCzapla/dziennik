@@ -1,5 +1,6 @@
 package pl.usagi.edziennik.ui.attendance
 
+import pl.usagi.edziennik.domain.AttendanceStatus
 import pl.usagi.edziennik.domain.time.SchoolYearRange
 import pl.usagi.edziennik.domain.time.coerceInSchoolYear
 import pl.usagi.edziennik.domain.time.currentSchoolYearRange
@@ -7,6 +8,19 @@ import pl.usagi.edziennik.ui.timetable.nextSchoolDate
 import pl.usagi.edziennik.ui.timetable.previousSchoolDate
 import java.time.DayOfWeek
 import java.time.LocalDate
+
+fun AttendanceStatus.label(): String =
+    when (this) {
+        AttendanceStatus.Present -> "Obecność"
+        AttendanceStatus.Absent -> "Nieobecność"
+        AttendanceStatus.ExcusedAbsence -> "Nieobecność usprawiedliwiona"
+        AttendanceStatus.Late -> "Spóźnienie"
+        AttendanceStatus.ExcusedLate -> "Spóźnienie usprawiedliwione"
+        AttendanceStatus.SchoolRelatedAbsence -> "Nieobecność z przyczyn szkolnych"
+        AttendanceStatus.Released -> "Zwolnienie"
+        is AttendanceStatus.Unknown -> description ?: rawValue?.let { "Status: $it" }
+            ?: "Status nieznany"
+    }
 
 fun initialAttendanceDate(
     today: LocalDate = LocalDate.now(),

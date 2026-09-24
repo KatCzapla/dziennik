@@ -1,10 +1,16 @@
 package pl.usagi.edziennik.mapper
 
 import pl.usagi.edziennik.domain.AttendanceEntry
+import pl.usagi.edziennik.domain.AttendanceCategoryStatistics
+import pl.usagi.edziennik.domain.AttendanceMonthStatistics
+import pl.usagi.edziennik.domain.AttendanceStatistics
 import pl.usagi.edziennik.domain.AttendanceStatus
+import pl.usagi.edziennik.domain.AttendanceSubject
 import pl.usagi.edziennik.domain.time.parseApiLocalDate
 import pl.usagi.edziennik.domain.time.parseApiLocalTime
 import pl.usagi.edziennik.dto.AttendanceEntryDto
+import pl.usagi.edziennik.dto.AttendanceStatisticsDto
+import pl.usagi.edziennik.dto.AttendanceSubjectDto
 
 fun AttendanceEntryDto.toDomainOrNull(): AttendanceEntry? {
     val date = date?.let(::runCatchingParseDate)?.getOrNull() ?: return null
@@ -28,9 +34,33 @@ fun List<AttendanceEntryDto>.toDomainAttendance(): List<AttendanceEntry> =
     mapNotNull { it.toDomainOrNull() }
         .sortedWith(compareBy<AttendanceEntry> { it.date }.thenBy { it.startTime })
 
+fun List<AttendanceSubjectDto>.toDomainAttendanceSubjects(): List<AttendanceSubject> =
+    map { AttendanceSubject(id = it.id, name = it.name) }
+
+fun AttendanceStatisticsDto.toDomain(): AttendanceStatistics =
+    AttendanceStatistics(
+        summary = summary,
+        categories = statistics.map { category ->
+            AttendanceCategoryStatistics(
+                status = category.attendanceCategory.toAttendanceStatus(),
+                total = category.total,
+                months = category.months.map { month ->
+                    AttendanceMonthStatistics(month = month.month, value = month.value)
+                },
+                periods = category.periods,
+            )
+        },
+    )
+
 private fun Int?.toAttendanceStatus(): AttendanceStatus =
     when (this) {
-        PRESENT_CATEGORY -> AttendanceStatus.Present
+        1 -> AttendanceStatus.Present
+        2 -> AttendanceStatus.Absent
+        3 -> AttendanceStatus.ExcusedAbsence
+        4 -> AttendanceStatus.Late
+        5 -> AttendanceStatus.ExcusedLate
+        6 -> AttendanceStatus.SchoolRelatedAbsence
+        7 -> AttendanceStatus.Released
         else -> AttendanceStatus.Unknown(rawValue = this)
     }
 
@@ -42,5 +72,3 @@ private fun runCatchingParseTime(value: String) =
 
 private fun String?.emptyToNull(): String? =
     takeUnless { it.isNullOrEmpty() }
-
-private const val PRESENT_CATEGORY = 1

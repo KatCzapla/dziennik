@@ -7,6 +7,7 @@ import pl.usagi.edziennik.domain.Grades
 import pl.usagi.edziennik.domain.SchoolTask
 import pl.usagi.edziennik.domain.SchoolTaskType
 import pl.usagi.edziennik.domain.TimetableEntry
+import pl.usagi.edziennik.ui.attendance.label
 import pl.usagi.edziennik.ui.grades.recentGrades
 import pl.usagi.edziennik.ui.schooltasks.typeLabel
 import java.time.Clock
@@ -130,11 +131,7 @@ fun LocalDate.dashboardHeaderLabel(): String =
 
 fun SchoolTaskType.dashboardLabel(): String = typeLabel()
 
-fun AttendanceStatus.dashboardLabel(): String =
-    when (this) {
-        AttendanceStatus.Present -> "Obecność"
-        is AttendanceStatus.Unknown -> description ?: rawValue?.let { "Status: $it" } ?: "Status nieznany"
-    }
+fun AttendanceStatus.dashboardLabel(): String = label()
 
 private val polishLocale = Locale.forLanguageTag("pl-PL")
 private val dayMonthFormatter = DateTimeFormatter.ofPattern("d MMMM", polishLocale)

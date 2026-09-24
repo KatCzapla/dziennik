@@ -172,11 +172,11 @@ class DashboardPresentationTest {
             attendanceEntry(
                 date = today,
                 start = LocalTime.of(8, 0),
-                status = AttendanceStatus.Unknown(rawValue = 7),
+                status = AttendanceStatus.Unknown(rawValue = 999),
             ),
         ).toDashboardAttendanceEntries(today).single()
 
-        assertEquals("Status: 7", entry.statusLabel)
+        assertEquals("Status: 999", entry.statusLabel)
     }
 
     @Test

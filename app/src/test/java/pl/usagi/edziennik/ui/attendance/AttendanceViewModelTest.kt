@@ -12,6 +12,8 @@ import pl.usagi.edziennik.MainDispatcherRule
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.AttendanceEntry
 import pl.usagi.edziennik.domain.AttendanceStatus
+import pl.usagi.edziennik.domain.AttendanceStatistics
+import pl.usagi.edziennik.domain.AttendanceSubject
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.time.WeekRange
 import pl.usagi.edziennik.repository.AttendanceRepository
@@ -287,16 +289,70 @@ class AttendanceViewModelTest {
         assertEquals(null, viewModel.uiState.value.errorMessage)
     }
 
+    @Test
+    fun statisticsStartWithAllSubjectsAndFetchSelectedSubjectId() = runTest {
+        val activeStudentManager = ActiveStudentManager()
+        val repository = FakeAttendanceRepository()
+        val viewModel = AttendanceViewModel(repository, activeStudentManager, fixedClock(LocalDate.of(2026, 9, 9)))
+
+        activeStudentManager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        viewModel.selectView(AttendanceView.STATISTICS)
+        advanceUntilIdle()
+
+        assertEquals(listOf(-1), repository.statisticsRequests)
+        assertEquals(-1, viewModel.uiState.value.selectedSubjectId)
+        assertEquals("Wszystkie", viewModel.uiState.value.subjects.first().name)
+        assertEquals(72.5, viewModel.uiState.value.statistics?.summary)
+
+        viewModel.selectSubject(7867)
+        advanceUntilIdle()
+
+        assertEquals(listOf(-1, 7867), repository.statisticsRequests)
+        assertEquals(7867, viewModel.uiState.value.selectedSubjectId)
+    }
+
+    @Test
+    fun switchingStudentResetsStatisticsToAllSubjects() = runTest {
+        val activeStudentManager = ActiveStudentManager()
+        val repository = FakeAttendanceRepository()
+        val viewModel = AttendanceViewModel(repository, activeStudentManager, fixedClock(LocalDate.of(2026, 9, 9)))
+
+        activeStudentManager.initialize(listOf(firstStudent, secondStudent))
+        activeStudentManager.setActiveStudent(firstStudent)
+        advanceUntilIdle()
+        viewModel.selectView(AttendanceView.STATISTICS)
+        advanceUntilIdle()
+        viewModel.selectSubject(7867)
+        advanceUntilIdle()
+        activeStudentManager.setActiveStudent(secondStudent)
+        advanceUntilIdle()
+
+        assertEquals(-1, viewModel.uiState.value.selectedSubjectId)
+        assertEquals(listOf(-1, 7867, -1), repository.statisticsRequests)
+    }
+
     private class FakeAttendanceRepository(
         private val entries: List<AttendanceEntry> = listOf(attendanceEntry()),
         private val error: Throwable? = null,
     ) : AttendanceRepository {
         val requests = mutableListOf<Pair<LocalDate, LocalDate>>()
+        val statisticsRequests = mutableListOf<Int>()
 
         override suspend fun getAttendance(from: LocalDate, to: LocalDate): List<AttendanceEntry> {
             requests += from to to
             error?.let { throw it }
             return entries
+        }
+
+        override suspend fun getSubjects(): List<AttendanceSubject> = listOf(
+            AttendanceSubject(-1, "Wszystkie"),
+            AttendanceSubject(7867, "Język polski"),
+        )
+
+        override suspend fun getStatistics(subjectId: Int): AttendanceStatistics {
+            statisticsRequests += subjectId
+            return AttendanceStatistics(summary = 72.5, categories = emptyList())
         }
     }
 

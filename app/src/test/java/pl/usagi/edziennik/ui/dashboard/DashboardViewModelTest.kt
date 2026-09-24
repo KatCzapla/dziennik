@@ -376,6 +376,11 @@ class DashboardViewModelTest {
             requests += AttendanceRequest(studentKey, from, to)
             return attendanceByStudent[studentKey] ?: response
         }
+
+        override suspend fun getSubjects() = emptyList<pl.usagi.edziennik.domain.AttendanceSubject>()
+
+        override suspend fun getStatistics(subjectId: Int): pl.usagi.edziennik.domain.AttendanceStatistics =
+            error("Dashboard does not request attendance statistics")
     }
 
     private class FakeGradesRepository(

@@ -56,7 +56,8 @@ private fun toTimetableChangeKind(
         changeType == TEACHER_ABSENCE_CHANGE_TYPE && teacherType == FIRST_SUPPORTING_TEACHER_TYPE ->
             TimetableChangeKind.FirstSupportingTeacherAbsence
 
-        changeType == CANCELLED_CHANGE_TYPE -> TimetableChangeKind.Cancelled
+        changeType == CANCELLED_CHANGE_TYPE || changeType == ALTERNATE_CANCELLED_CHANGE_TYPE ->
+            TimetableChangeKind.Cancelled
         changeType == SUBSTITUTION_CHANGE_TYPE -> TimetableChangeKind.Substitution
         else -> TimetableChangeKind.Unknown(changeType)
     }
@@ -64,4 +65,5 @@ private fun toTimetableChangeKind(
 private const val TEACHER_ABSENCE_CHANGE_TYPE = 2
 private const val FIRST_SUPPORTING_TEACHER_TYPE = 1
 private const val CANCELLED_CHANGE_TYPE = 4
+private const val ALTERNATE_CANCELLED_CHANGE_TYPE = 1
 private const val SUBSTITUTION_CHANGE_TYPE = 7

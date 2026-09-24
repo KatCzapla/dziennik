@@ -2,9 +2,32 @@ package pl.usagi.edziennik.ui.attendance
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import pl.usagi.edziennik.domain.AttendanceStatus
 import java.time.LocalDate
 
 class AttendancePresentationTest {
+    @Test
+    fun confirmedStatusesHaveReadableLabels() {
+        val expected = mapOf(
+            AttendanceStatus.Present to "Obecność",
+            AttendanceStatus.Absent to "Nieobecność",
+            AttendanceStatus.ExcusedAbsence to "Nieobecność usprawiedliwiona",
+            AttendanceStatus.Late to "Spóźnienie",
+            AttendanceStatus.ExcusedLate to "Spóźnienie usprawiedliwione",
+            AttendanceStatus.SchoolRelatedAbsence to "Nieobecność z przyczyn szkolnych",
+            AttendanceStatus.Released to "Zwolnienie",
+        )
+
+        expected.forEach { (status, label) ->
+            assertEquals(label, status.label())
+        }
+    }
+
+    @Test
+    fun unknownStatusShowsRawValue() {
+        assertEquals("Status: 999", AttendanceStatus.Unknown(999).label())
+    }
+
     @Test
     fun initialDateKeepsMonday() {
         val monday = LocalDate.of(2026, 9, 7)
