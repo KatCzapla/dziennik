@@ -2,8 +2,11 @@ package pl.usagi.edziennik.network.attendance
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import pl.usagi.edziennik.dto.AttendanceResponseDto
+import pl.usagi.edziennik.dto.AttendanceStatisticsDto
+import pl.usagi.edziennik.dto.AttendanceSubjectDto
 import pl.usagi.edziennik.network.UonetApiClient
 import javax.inject.Inject
 
@@ -34,10 +37,47 @@ class UonetAttendanceDataSource @Inject constructor(
         }
     }
 
+    suspend fun getSubjects(studentKey: String): List<AttendanceSubjectDto> = withContext(Dispatchers.IO) {
+        val url = API_URL.toHttpUrl()
+            .newBuilder()
+            .addPathSegment("Przedmioty")
+            .addQueryParameter("key", studentKey)
+            .build()
+
+        try {
+            apiClient.get(url, ListSerializer(AttendanceSubjectDto.serializer()))
+        } catch (failure: UonetApiClient.Failure) {
+            throw failure.toAttendanceFetchException()
+        }
+    }
+
+    suspend fun getStatistics(studentKey: String, subjectId: Int): AttendanceStatisticsDto =
+        withContext(Dispatchers.IO) {
+            val url = API_URL.toHttpUrl()
+                .newBuilder()
+                .addPathSegment("FrekwencjaStatystyki")
+                .addQueryParameter("key", studentKey)
+                .addQueryParameter("idPrzedmiot", subjectId.toString())
+                .build()
+
+            try {
+                apiClient.get(url, AttendanceStatisticsDto.serializer())
+            } catch (failure: UonetApiClient.Failure) {
+                throw failure.toAttendanceFetchException()
+            }
+        }
+
     private companion object {
         const val API_URL = "https://projekt-uczen.edu.lublin.eu/lublin/api"
     }
 }
+
+private fun UonetApiClient.Failure.toAttendanceFetchException(): AttendanceFetchException =
+    when (this) {
+        is UonetApiClient.Failure.Network -> AttendanceFetchException.Network(networkCause)
+        is UonetApiClient.Failure.Http -> AttendanceFetchException.Http(statusCode)
+        is UonetApiClient.Failure.Unexpected -> AttendanceFetchException.UnexpectedResponse
+    }
 
 sealed class AttendanceFetchException(
     message: String,
