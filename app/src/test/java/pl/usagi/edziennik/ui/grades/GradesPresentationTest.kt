@@ -13,6 +13,38 @@ import java.time.OffsetDateTime
 
 class GradesPresentationTest {
     @Test
+    fun subjectWithGradeIsVisible() {
+        val subject = subject(position = 1, name = "Matematyka", grade = grade("4", LocalDate.of(2026, 9, 10)))
+
+        assertEquals(true, subject.hasPresentableGrades(showAverageAndPoints = false))
+    }
+
+    @Test
+    fun completelyEmptySubjectIsHidden() {
+        val subject = subject(position = 1, name = "Matematyka", grade = grade("4", LocalDate.of(2026, 9, 10)))
+            .copy(columns = emptyList())
+
+        assertEquals(false, subject.hasPresentableGrades(showAverageAndPoints = false))
+    }
+
+    @Test
+    fun subjectWithTermGradeButNoRegularGradesIsVisible() {
+        val subject = subject(position = 1, name = "Matematyka", grade = grade("4", LocalDate.of(2026, 9, 10)))
+            .copy(columns = emptyList(), termGrade = "5")
+
+        assertEquals(true, subject.hasPresentableGrades(showAverageAndPoints = false))
+    }
+
+    @Test
+    fun averageOnlyCountsWhenShownOnSubjectScreen() {
+        val subject = subject(position = 1, name = "Matematyka", grade = grade("4", LocalDate.of(2026, 9, 10)))
+            .copy(columns = emptyList(), average = java.math.BigDecimal("4.5"))
+
+        assertEquals(false, subject.hasPresentableGrades(showAverageAndPoints = false))
+        assertEquals(true, subject.hasPresentableGrades(showAverageAndPoints = true))
+    }
+
+    @Test
     fun recentGradesAreSortedByDateDescendingAcrossSubjects() {
         val grades = Grades(
             subjects = listOf(

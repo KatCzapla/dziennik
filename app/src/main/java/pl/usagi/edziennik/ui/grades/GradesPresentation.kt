@@ -41,6 +41,21 @@ fun Grades.subjectByPosition(position: Int): SubjectGrades? =
 fun SubjectGrades.gradeCount(): Int =
     columns.sumOf { it.grades.size }
 
+fun SubjectGrades.hasPresentableGrades(showAverageAndPoints: Boolean): Boolean =
+    gradeCount() > 0 ||
+        listOf(
+            proposedTermGrade,
+            termGrade,
+            practicalExamGrade,
+            oralExamGrade,
+            proposedExamGrade,
+            finalExamGrade,
+        ).any { !it.isNullOrBlank() } ||
+        (showAverageAndPoints && (
+            average != null || averageAllTerms != null ||
+                !pointsSum.isNullOrBlank() || !pointsSumAllTerms.isNullOrBlank()
+            ))
+
 fun SubjectGrades.latestGrades(limit: Int): List<Grade> =
     columns.flatMap { it.grades }
         .sortedByDescending { it.date }

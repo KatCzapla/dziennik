@@ -190,6 +190,9 @@ private fun GradesScreen(
 
             if (state.grades != null) {
                 val grades = state.grades
+                val visibleSubjects = grades.subjects.filter {
+                    it.hasPresentableGrades(grades.settings.showAverageAndPoints)
+                }
                 item {
                     RecentGradesSection(recentGrades = grades.recentGrades())
                 }
@@ -205,7 +208,7 @@ private fun GradesScreen(
                 }
 
                 itemsIndexed(
-                    items = grades.subjects,
+                    items = visibleSubjects,
                     key = { _, subject -> subject.position },
                 ) { index, subject ->
                     SubjectGradesRow(
@@ -213,7 +216,7 @@ private fun GradesScreen(
                         onClick = { onOpenSubject(subject.position) },
                     )
 
-                    if (index != grades.subjects.lastIndex) {
+                    if (index != visibleSubjects.lastIndex) {
                         HorizontalDivider(
                             color = MaterialTheme.colorScheme.outlineVariant,
                         )
