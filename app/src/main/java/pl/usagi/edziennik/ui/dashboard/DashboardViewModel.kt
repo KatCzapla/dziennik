@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +17,7 @@ import pl.usagi.edziennik.domain.time.clampedSchoolWeekEnd
 import pl.usagi.edziennik.domain.time.clampedSchoolWeekStart
 import pl.usagi.edziennik.domain.time.currentSchoolYearRange
 import pl.usagi.edziennik.repository.AttendanceRepository
+import pl.usagi.edziennik.repository.DashboardRepository
 import pl.usagi.edziennik.repository.GradesRepository
 import pl.usagi.edziennik.repository.MessagesRepository
 import pl.usagi.edziennik.repository.SchoolTasksRepository
@@ -36,6 +38,7 @@ class DashboardViewModel @Inject constructor(
     private val messagesRepository: MessagesRepository,
     private val activeStudentManager: ActiveStudentManager,
     private val clock: Clock,
+    private val dashboardRepository: DashboardRepository,
 ) : ViewModel() {
     private val schoolYearRange = currentSchoolYearRange(LocalDate.now(clock))
     private val _uiState = MutableStateFlow(
@@ -83,6 +86,7 @@ class DashboardViewModel @Inject constructor(
                         recentGrades = DashboardSection(),
                         upcomingTasks = DashboardSection(),
                         unreadMessagesCount = DashboardSection(),
+                        information = DashboardSection(),
                     )
                 }
                 if (student != null) {
@@ -116,6 +120,27 @@ class DashboardViewModel @Inject constructor(
         loadGrades(student)
         loadSchoolTasks(student, today)
         loadUnreadMessagesCount(student)
+        loadInformation(student)
+    }
+
+    private fun loadInformation(student: Student) {
+        _uiState.update { it.copy(information = DashboardSection(isLoading = true)) }
+        viewModelScope.launch {
+            try {
+                val information = dashboardRepository.getInformation(student)
+                if (student.isStillActive()) {
+                    _uiState.update { it.copy(information = DashboardSection(data = information)) }
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                if (student.isStillActive()) {
+                    _uiState.update {
+                        it.copy(information = DashboardSection(errorMessage = "Nie udało się pobrać informacji"))
+                    }
+                }
+            }
+        }
     }
 
     private fun loadTimetableDay(

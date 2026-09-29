@@ -13,6 +13,10 @@ import javax.inject.Singleton
 interface RepositoryModule {
     @Binds
     @Singleton
+    fun bindDashboardRepository(repository: UonetDashboardRepository): DashboardRepository
+
+    @Binds
+    @Singleton
     fun bindStudentRepository(repository: UonetStudentRepository): StudentRepository
 
     @Binds

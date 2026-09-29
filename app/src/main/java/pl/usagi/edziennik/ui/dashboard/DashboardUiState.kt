@@ -1,6 +1,7 @@
 package pl.usagi.edziennik.ui.dashboard
 
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.domain.DashboardInformation
 import java.time.LocalDate
 
 data class DashboardUiState(
@@ -14,6 +15,7 @@ data class DashboardUiState(
     val recentGrades: DashboardSection<List<DashboardGrade>> = DashboardSection(),
     val upcomingTasks: DashboardSection<List<DashboardTask>> = DashboardSection(),
     val unreadMessagesCount: DashboardSection<Int> = DashboardSection(),
+    val information: DashboardSection<List<DashboardInformation>> = DashboardSection(),
 ) {
     val selectedTimetable: DashboardSection<List<DashboardLesson>>
         get() = when (selectedTimetableDay) {

@@ -23,12 +23,24 @@ import pl.usagi.edziennik.dto.TimetableEntryDto
 import pl.usagi.edziennik.mapper.toDomain
 import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
 import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
+import pl.usagi.edziennik.ui.timetable.dayMonthLabel
 import pl.usagi.edziennik.ui.messages.dashboardUnreadBadgeLabel
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 
 class DashboardPresentationTest {
+    @Test
+    fun informationDateUsesFullMonthWithoutYearInFirstLine() {
+        val september = LocalDate.of(2026, 9, 7)
+        val october = LocalDate.of(2026, 10, 30)
+
+        assertEquals("7 września", september.dayMonthLabel())
+        assertEquals("30 października", october.dayMonthLabel())
+        assertEquals("2026", september.year.toString())
+        assertEquals("2026", october.year.toString())
+    }
+
     @Test
     fun dashboardTasksKeepDistinctHomeworkAndTestNavigationTargets() {
         val date = LocalDate.of(2026, 9, 14)

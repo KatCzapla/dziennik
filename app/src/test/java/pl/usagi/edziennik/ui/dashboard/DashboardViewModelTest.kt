@@ -28,6 +28,8 @@ import pl.usagi.edziennik.domain.SchoolTaskType
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.SubjectGrades
 import pl.usagi.edziennik.domain.TimetableEntry
+import pl.usagi.edziennik.domain.DashboardInformation
+import pl.usagi.edziennik.repository.DashboardRepository
 import pl.usagi.edziennik.repository.AttendanceRepository
 import pl.usagi.edziennik.repository.GradesRepository
 import pl.usagi.edziennik.repository.MessagesRepository
@@ -46,6 +48,63 @@ class DashboardViewModelTest {
     val mainDispatcherRule = MainDispatcherRule()
 
     @Test
+    fun loadsMultipleInformationEntriesForActiveStudent() = runTest {
+        val manager = ActiveStudentManager()
+        val information = listOf(
+            DashboardInformation("Pierwsza", "Treść 1", today),
+            DashboardInformation("Druga", "Treść 2", today),
+        )
+        val repository = FakeDashboardRepository(information)
+        val viewModel = DashboardViewModel(
+            FakeTimetableRepository(manager), FakeAttendanceRepository(manager), FakeGradesRepository(),
+            FakeSchoolTasksRepository(manager), FakeMessagesRepository(), manager, fixedClock(), repository,
+        )
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+
+        assertEquals(listOf(firstStudent), repository.requests)
+        assertEquals(information, viewModel.uiState.value.information.data)
+        assertFalse(viewModel.uiState.value.information.isLoading)
+        assertEquals(null, viewModel.uiState.value.information.errorMessage)
+    }
+
+    @Test
+    fun emptyInformationResponseHasNoEntriesOrError() = runTest {
+        val manager = ActiveStudentManager()
+        val viewModel = DashboardViewModel(
+            FakeTimetableRepository(manager), FakeAttendanceRepository(manager), FakeGradesRepository(),
+            FakeSchoolTasksRepository(manager), FakeMessagesRepository(), manager, fixedClock(), FakeDashboardRepository(),
+        )
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+
+        assertEquals(emptyList<DashboardInformation>(), viewModel.uiState.value.information.data)
+        assertFalse(viewModel.uiState.value.information.isLoading)
+        assertEquals(null, viewModel.uiState.value.information.errorMessage)
+    }
+
+    @Test
+    fun informationEndpointErrorDoesNotRemoveOtherDashboardSections() = runTest {
+        val manager = ActiveStudentManager()
+        val viewModel = DashboardViewModel(
+            FakeTimetableRepository(manager), FakeAttendanceRepository(manager), FakeGradesRepository(),
+            FakeSchoolTasksRepository(manager), FakeMessagesRepository(), manager, fixedClock(),
+            FakeDashboardRepository(failure = true),
+        )
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals("Nie udało się pobrać informacji", state.information.errorMessage)
+        assertFalse(state.information.isLoading)
+        assertEquals("Matematyka", state.todayTimetable.data?.single()?.subject)
+        assertEquals("Matematyka", state.todayAttendance.data?.single()?.subject)
+        assertEquals("5", state.recentGrades.data?.single()?.value)
+        assertEquals("Równania liniowe", state.upcomingTasks.data?.single()?.description)
+        assertEquals(3, state.unreadMessagesCount.data)
+    }
+
+    @Test
     fun loadsAllSectionsForActiveStudent() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val timetableRepository = FakeTimetableRepository(activeStudentManager)
@@ -60,6 +119,7 @@ class DashboardViewModelTest {
             schoolTasksRepository = schoolTasksRepository,
             messagesRepository = messagesRepository,
             activeStudentManager = activeStudentManager,
+            dashboardRepository = FakeDashboardRepository(),
             clock = fixedClock(),
         )
 
@@ -92,6 +152,7 @@ class DashboardViewModelTest {
             schoolTasksRepository = schoolTasksRepository,
             messagesRepository = FakeMessagesRepository(),
             activeStudentManager = activeStudentManager,
+            dashboardRepository = FakeDashboardRepository(),
             clock = fixedClock(),
         )
 
@@ -131,6 +192,7 @@ class DashboardViewModelTest {
             schoolTasksRepository = schoolTasksRepository,
             messagesRepository = messagesRepository,
             activeStudentManager = activeStudentManager,
+            dashboardRepository = FakeDashboardRepository(),
             clock = fixedClock(),
         )
 
@@ -168,6 +230,7 @@ class DashboardViewModelTest {
             schoolTasksRepository = schoolTasksRepository,
             messagesRepository = FakeMessagesRepository(),
             activeStudentManager = activeStudentManager,
+            dashboardRepository = FakeDashboardRepository(),
             clock = fixedClock(),
         )
 
@@ -208,6 +271,7 @@ class DashboardViewModelTest {
             schoolTasksRepository = FakeSchoolTasksRepository(activeStudentManager),
             messagesRepository = FakeMessagesRepository(),
             activeStudentManager = activeStudentManager,
+            dashboardRepository = FakeDashboardRepository(),
             clock = fixedClock(LocalDate.of(2027, 6, 30)),
         )
 
@@ -239,6 +303,7 @@ class DashboardViewModelTest {
             schoolTasksRepository = FakeSchoolTasksRepository(activeStudentManager),
             messagesRepository = FakeMessagesRepository(),
             activeStudentManager = activeStudentManager,
+            dashboardRepository = FakeDashboardRepository(),
             clock = fixedClock(),
         )
 
@@ -262,6 +327,7 @@ class DashboardViewModelTest {
             schoolTasksRepository = FakeSchoolTasksRepository(activeStudentManager),
             messagesRepository = FakeMessagesRepository(),
             activeStudentManager = activeStudentManager,
+            dashboardRepository = FakeDashboardRepository(),
             clock = fixedClock(),
         )
 
@@ -281,6 +347,7 @@ class DashboardViewModelTest {
             schoolTasksRepository = FakeSchoolTasksRepository(activeStudentManager),
             messagesRepository = FakeMessagesRepository(),
             activeStudentManager = activeStudentManager,
+            dashboardRepository = FakeDashboardRepository(),
             clock = fixedClock(),
         )
 
@@ -303,6 +370,7 @@ class DashboardViewModelTest {
             schoolTasksRepository = FakeSchoolTasksRepository(activeStudentManager),
             messagesRepository = FakeMessagesRepository(failUnread = true),
             activeStudentManager = activeStudentManager,
+            dashboardRepository = FakeDashboardRepository(),
             clock = fixedClock(),
         )
 
@@ -328,6 +396,7 @@ class DashboardViewModelTest {
             schoolTasksRepository = FakeSchoolTasksRepository(activeStudentManager),
             messagesRepository = messagesRepository,
             activeStudentManager = activeStudentManager,
+            dashboardRepository = FakeDashboardRepository(),
             clock = fixedClock(),
         )
 
@@ -418,6 +487,19 @@ class DashboardViewModelTest {
             val studentKey = activeStudentManager.activeStudent.value?.key
             requests += SchoolTaskRequest(studentKey, from, to)
             return tasksByStudent[studentKey] ?: listOf(task())
+        }
+    }
+
+    private class FakeDashboardRepository(
+        private val information: List<DashboardInformation> = emptyList(),
+        private val failure: Boolean = false,
+    ) : DashboardRepository {
+        val requests = mutableListOf<Student>()
+
+        override suspend fun getInformation(student: Student): List<DashboardInformation> {
+            requests += student
+            if (failure) error("Information endpoint failed")
+            return information
         }
     }
 

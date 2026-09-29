@@ -24,6 +24,9 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Mail
 import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -35,6 +38,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.domain.DashboardInformation
 import pl.usagi.edziennik.network.messages.MessagesDiagnostics
 import pl.usagi.edziennik.network.session.LoggedInUser
 import pl.usagi.edziennik.ui.components.EDziennikTopBar
@@ -52,6 +59,7 @@ import pl.usagi.edziennik.ui.messages.dashboardUnreadBadgeLabel
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
 import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
+import pl.usagi.edziennik.ui.timetable.dayMonthLabel
 
 @Composable
 fun DashboardRoute(
@@ -189,6 +197,12 @@ private fun DashboardScreen(
                     onOpenSchoolTasks = onOpenSchoolTasks,
                     onOpenTask = onOpenTask,
                 )
+            }
+
+            if (state.information.isLoading || state.information.errorMessage != null || !state.information.data.isNullOrEmpty()) {
+                item(key = "information-${state.activeStudent?.diaryId}") {
+                    InformationSection(section = state.information)
+                }
             }
 
             item {
@@ -562,7 +576,9 @@ private fun GradesSection(
             Column(verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.sm)) {
                 grades.forEach { grade ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().clickable { onOpenGrade(grade.target) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenGrade(grade.target) },
                         horizontalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.md),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -615,6 +631,74 @@ private fun DashboardGradeBadge(value: String) {
 }
 
 @Composable
+private fun InformationSection(section: DashboardSection<List<DashboardInformation>>) {
+    val spacing = EDziennikTheme.spacing
+    DashboardSectionLayout(title = "INFORMACJE", icon = Icons.Outlined.Info) {
+        SectionBody(section = section, emptyText = "") { information ->
+            Column(verticalArrangement = Arrangement.spacedBy(spacing.md)) {
+                information.forEach { entry ->
+                    var expanded by rememberSaveable(entry.subject, entry.date.toString(), entry.content) {
+                        mutableStateOf(false)
+                    }
+
+                    Column(
+                        modifier = Modifier.padding(bottom = if (expanded) spacing.md else 0.dp),
+                        verticalArrangement = Arrangement.spacedBy(spacing.md),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expanded = !expanded },
+                            horizontalArrangement = Arrangement.spacedBy(spacing.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.width(68.dp)) {
+                                Text(
+                                    text = entry.date.dayMonthLabel(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = entry.date.year.toString(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .height(44.dp)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)),
+                            )
+                            Text(
+                                text = entry.subject,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Icon(
+                                imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                                contentDescription = if (expanded) "Zwiń treść" else "Rozwiń treść",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (expanded) {
+                            Text(
+                                text = entry.content,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SchoolTasksSection(
     section: DashboardSection<List<DashboardTask>>,
     onOpenSchoolTasks: () -> Unit,
@@ -633,7 +717,9 @@ private fun SchoolTasksSection(
             Column(verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.md)) {
                 tasks.forEach { task ->
                     Column(
-                        modifier = Modifier.fillMaxWidth().clickable { onOpenTask(task.target) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenTask(task.target) },
                         verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.xxs),
                     ) {
                         Text(
