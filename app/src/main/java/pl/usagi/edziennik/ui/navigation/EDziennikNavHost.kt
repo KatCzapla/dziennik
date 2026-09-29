@@ -14,6 +14,7 @@ import pl.usagi.edziennik.ui.grades.GradesSubjectRoute
 import pl.usagi.edziennik.ui.grades.GradesViewModel
 import pl.usagi.edziennik.ui.login.LoginRoute
 import pl.usagi.edziennik.ui.messages.MessagesRoute
+import pl.usagi.edziennik.ui.payments.PaymentsRoute
 import pl.usagi.edziennik.ui.schooltasks.SchoolTasksRoute
 import pl.usagi.edziennik.ui.timetable.TimetableRoute
 
@@ -44,6 +45,7 @@ fun EDziennikNavHost() {
                 onOpenMessages = {
                     navController.navigate("messages")
                 },
+                onOpenPayments = { navController.navigate("payments") },
             )
         }
         composable("timetable") {
@@ -108,6 +110,9 @@ fun EDziennikNavHost() {
                     navController.popBackStack()
                 },
             )
+        }
+        composable("payments") {
+            PaymentsRoute(onBack = { navController.popBackStack() })
         }
     }
 }

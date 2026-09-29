@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Mail
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material3.ButtonDefaults
@@ -71,6 +72,7 @@ fun DashboardRoute(
     onOpenGrade: (GradeNavigationTarget) -> Unit,
     onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
+    onOpenPayments: () -> Unit,
     onLogout: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
@@ -89,6 +91,7 @@ fun DashboardRoute(
         onOpenGrade = onOpenGrade,
         onOpenTask = onOpenTask,
         onOpenMessages = onOpenMessages,
+        onOpenPayments = onOpenPayments,
         onLogout = onLogout,
     )
 }
@@ -107,6 +110,7 @@ private fun DashboardScreen(
     onOpenGrade: (GradeNavigationTarget) -> Unit,
     onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
+    onOpenPayments: () -> Unit,
     onLogout: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
@@ -158,6 +162,7 @@ private fun DashboardScreen(
                     onOpenGrades = onOpenGrades,
                     onOpenSchoolTasks = onOpenSchoolTasks,
                     onOpenMessages = onOpenMessages,
+                    onOpenPayments = onOpenPayments,
                     unreadMessagesBadge = state.unreadMessagesCount.data.dashboardUnreadBadgeLabel(),
                 )
             }
@@ -219,6 +224,7 @@ private fun DashboardQuickNavigation(
     onOpenGrades: () -> Unit,
     onOpenSchoolTasks: () -> Unit,
     onOpenMessages: () -> Unit,
+    onOpenPayments: () -> Unit,
     unreadMessagesBadge: String?,
 ) {
     LazyRow(
@@ -230,6 +236,13 @@ private fun DashboardQuickNavigation(
                 icon = Icons.Outlined.Mail,
                 badge = unreadMessagesBadge,
                 onClick = onOpenMessages,
+            )
+        }
+        item {
+            QuickNavigationItem(
+                label = "Opłaty",
+                icon = Icons.Outlined.AccountBalance,
+                onClick = onOpenPayments,
             )
         }
         item {

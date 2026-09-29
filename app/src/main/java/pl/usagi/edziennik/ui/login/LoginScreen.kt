@@ -65,6 +65,7 @@ fun LoginRoute(
     onOpenGrade: (GradeNavigationTarget) -> Unit,
     onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
+    onOpenPayments: () -> Unit,
     viewModel: LoginViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -84,6 +85,7 @@ fun LoginRoute(
         onOpenGrade = onOpenGrade,
         onOpenTask = onOpenTask,
         onOpenMessages = onOpenMessages,
+        onOpenPayments = onOpenPayments,
     )
 }
 
@@ -103,6 +105,7 @@ private fun LoginScreen(
     onOpenGrade: (GradeNavigationTarget) -> Unit,
     onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
+    onOpenPayments: () -> Unit,
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -140,6 +143,7 @@ private fun LoginScreen(
                         onOpenGrade = onOpenGrade,
                         onOpenTask = onOpenTask,
                         onOpenMessages = onOpenMessages,
+                        onOpenPayments = onOpenPayments,
                         onLogout = onClearSession,
                     )
                     LoginScreenMode.PickStudent -> StudentPickerContent(
