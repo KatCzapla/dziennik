@@ -7,6 +7,7 @@ import pl.usagi.edziennik.domain.time.WeekRange
 import pl.usagi.edziennik.domain.time.currentSchoolYearRange
 import pl.usagi.edziennik.domain.time.intersectsSchoolYear
 import java.time.LocalDate
+import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 
 data class SchoolTasksUiState(
     val students: List<Student> = emptyList(),
@@ -16,6 +17,7 @@ data class SchoolTasksUiState(
     val weekTasks: List<SchoolTask> = emptyList(),
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
+    val navigationTarget: SchoolTaskNavigationTarget? = null,
 ) {
     val displayedWeek: WeekRange = WeekRange.fromDate(selectedDate)
     val dayGroups: List<SchoolTasksDayGroup> = weekTasks.groupBySchoolDay()

@@ -149,6 +149,8 @@ class UonetMessagesRepositoryTest {
 
         override suspend fun getMessageDetails(apiGlobalKey: String): MessageDetailsDto = details
 
+        override suspend fun downloadAttachment(url: String, destination: java.io.File): String? = error("not used")
+
         override suspend fun markMessageAsRead(apiGlobalKey: String) = Unit
     }
 

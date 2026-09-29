@@ -7,13 +7,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.MessageMailboxType
+import pl.usagi.edziennik.domain.MessageAttachment
 import pl.usagi.edziennik.domain.ReceivedMessage
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.repository.MessagesRepository
 import javax.inject.Inject
+import java.io.File
 
 @HiltViewModel
 class MessagesViewModel @Inject constructor(
@@ -96,6 +99,24 @@ class MessagesViewModel @Inject constructor(
             mailboxState.copy(messageDetails = mailboxState.messageDetails - messageId)
         }
         loadDetailsIfNeeded(mailboxType, message)
+    }
+
+    fun downloadAttachment(
+        attachment: MessageAttachment,
+        destination: File,
+        onResult: (Result<String?>) -> Unit,
+    ) {
+        viewModelScope.launch {
+            try {
+                onResult(Result.success(messagesRepository.downloadAttachment(attachment.url, destination)))
+            } catch (exception: CancellationException) {
+                destination.delete()
+                throw exception
+            } catch (exception: Exception) {
+                destination.delete()
+                onResult(Result.failure(exception))
+            }
+        }
     }
 
     private fun loadInitial(

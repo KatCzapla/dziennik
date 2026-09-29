@@ -52,6 +52,8 @@ import pl.usagi.edziennik.ui.components.EmptyState
 import pl.usagi.edziennik.ui.components.QuietLoadingState
 import pl.usagi.edziennik.ui.components.StudentSwitcher
 import pl.usagi.edziennik.ui.dashboard.DashboardRoute
+import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
+import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 
 @Composable
@@ -60,6 +62,8 @@ fun LoginRoute(
     onOpenAttendance: () -> Unit,
     onOpenGrades: () -> Unit,
     onOpenSchoolTasks: () -> Unit,
+    onOpenGrade: (GradeNavigationTarget) -> Unit,
+    onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
     viewModel: LoginViewModel = hiltViewModel(),
 ) {
@@ -77,6 +81,8 @@ fun LoginRoute(
         onOpenAttendance = onOpenAttendance,
         onOpenGrades = onOpenGrades,
         onOpenSchoolTasks = onOpenSchoolTasks,
+        onOpenGrade = onOpenGrade,
+        onOpenTask = onOpenTask,
         onOpenMessages = onOpenMessages,
     )
 }
@@ -94,6 +100,8 @@ private fun LoginScreen(
     onOpenAttendance: () -> Unit,
     onOpenGrades: () -> Unit,
     onOpenSchoolTasks: () -> Unit,
+    onOpenGrade: (GradeNavigationTarget) -> Unit,
+    onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
 ) {
     Scaffold(
@@ -129,6 +137,8 @@ private fun LoginScreen(
                         onOpenAttendance = onOpenAttendance,
                         onOpenGrades = onOpenGrades,
                         onOpenSchoolTasks = onOpenSchoolTasks,
+                        onOpenGrade = onOpenGrade,
+                        onOpenTask = onOpenTask,
                         onOpenMessages = onOpenMessages,
                         onLogout = onClearSession,
                     )

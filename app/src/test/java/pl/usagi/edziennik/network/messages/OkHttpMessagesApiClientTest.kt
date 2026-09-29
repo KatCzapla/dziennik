@@ -11,13 +11,71 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import pl.usagi.edziennik.domain.MessageMailboxType
 
 class OkHttpMessagesApiClientTest {
+    @get:Rule val temporaryFolder = TemporaryFolder()
+
+    @Test
+    fun attachmentDownloadUsesExistingMessagesHeadersAndResolvesRelativeUrl() = runTest {
+        val requests = mutableListOf<Request>()
+        val client = OkHttpMessagesApiClient(
+            okHttpClient = scriptedClient(
+                responseBody = "PDF bytes",
+                contentType = "application/pdf",
+                requests = requests,
+            ),
+            json = json,
+        )
+        val destination = temporaryFolder.newFile("attachment.pdf")
+
+        val mimeType = client.downloadAttachment(messagesContext(), "/lublin/files/a.pdf?id=7", destination)
+
+        assertEquals("PDF bytes", destination.readText())
+        assertEquals("application/pdf", mimeType)
+        val request = requests.single()
+        assertEquals("https://messages.test/lublin/files/a.pdf?id=7", request.url.toString())
+        assertEquals("GET", request.method)
+        assertEquals("https://messages.test/lublin/App/odebrane", request.header("Referer"))
+        assertEquals("app-guid", request.header("X-V-AppGuid"))
+        assertEquals("verification-token", request.header("X-V-RequestVerificationToken"))
+    }
+
+    @Test
+    fun externalAttachmentHostNeverReceivesMessagesToken() = runTest {
+        val requests = mutableListOf<Request>()
+        val client = OkHttpMessagesApiClient(
+            okHttpClient = scriptedClient(responseBody = "data", requests = requests),
+            json = json,
+        )
+
+        client.downloadAttachment(messagesContext(), "https://files.test/a.pdf", temporaryFolder.newFile())
+
+        assertNull(requests.single().header("X-V-RequestVerificationToken"))
+        assertNull(requests.single().header("X-V-AppGuid"))
+    }
+
+    @Test
+    fun failedAttachmentDownloadRemovesPartialFile() {
+        val client = OkHttpMessagesApiClient(
+            okHttpClient = scriptedClient(responseCode = 500),
+            json = json,
+        )
+        val destination = temporaryFolder.newFile("failed.pdf")
+
+        assertThrows(MessagesSessionException.Http::class.java) {
+            runTest { client.downloadAttachment(messagesContext(), "/files/failed.pdf", destination) }
+        }
+        assertFalse(destination.exists())
+    }
+
     @Test
     fun unreadCountsRequestUsesMessagesBaseUrlAndRequiredHeaders() = runTest {
         val requests = mutableListOf<Request>()
@@ -260,6 +318,7 @@ class OkHttpMessagesApiClientTest {
     private fun scriptedClient(
         responseCode: Int = 200,
         responseBody: String = """[]""",
+        contentType: String = "application/json",
         requests: MutableList<Request> = mutableListOf(),
     ): OkHttpClient =
         OkHttpClient.Builder()
@@ -271,8 +330,8 @@ class OkHttpMessagesApiClientTest {
                     .protocol(Protocol.HTTP_1_1)
                     .code(responseCode)
                     .message("OK")
-                    .header("Content-Type", "application/json")
-                    .body(responseBody.toResponseBody("application/json".toMediaType()))
+                    .header("Content-Type", contentType)
+                    .body(responseBody.toResponseBody(contentType.toMediaType()))
                     .build()
             }
             .build()

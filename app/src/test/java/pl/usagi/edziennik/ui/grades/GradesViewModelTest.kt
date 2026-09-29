@@ -1,5 +1,6 @@
 package pl.usagi.edziennik.ui.grades
 
+import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.serialization.SerializationException
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -20,6 +21,7 @@ import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.SubjectGrades
 import pl.usagi.edziennik.repository.GradesRepository
 import pl.usagi.edziennik.network.grades.GradesFetchException
+import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
 import java.io.IOException
 import java.time.Clock
 import java.time.LocalDate
@@ -30,6 +32,44 @@ import java.time.ZoneId
 class GradesViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+
+    @Test
+    fun navigationTargetSelectsItsPeriodAndOpensExactGradeOnlyOnce() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = FakeGradesRepository()
+        val handle = SavedStateHandle(mapOf(
+            "periodId" to "123", "subjectPosition" to "1", "columnId" to "1", "gradeIndex" to "0",
+        ))
+        val viewModel = GradesViewModel(repository, manager, fixedClock("2027-03-15T12:00:00+01:00"), handle)
+        assertNull(viewModel.consumeNavigationTarget())
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+
+        assertEquals(listOf(firstStudent.key to 123), repository.gradeRequests)
+        assertEquals(GradeNavigationTarget(123, 1, 1, 0), viewModel.consumeNavigationTarget())
+        assertNull(viewModel.consumeNavigationTarget())
+        assertEquals(true, handle.get<Boolean>("gradeTargetConsumed"))
+    }
+
+    @Test
+    fun ordinaryNavigationDoesNotAutoOpenGrade() = runTest {
+        val manager = ActiveStudentManager()
+        val viewModel = GradesViewModel(FakeGradesRepository(), manager, fixedClock())
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        assertNull(viewModel.consumeNavigationTarget())
+    }
+
+    @Test
+    fun missingGradeDoesNotOpenAnotherRecord() = runTest {
+        val manager = ActiveStudentManager()
+        val viewModel = GradesViewModel(FakeGradesRepository(), manager, fixedClock(), SavedStateHandle(mapOf(
+            "periodId" to "123", "subjectPosition" to "1", "columnId" to "1", "gradeIndex" to "999",
+        )))
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        assertNull(viewModel.consumeNavigationTarget())
+    }
 
     @Test
     fun initialLoadFetchesPeriodsSelectsCurrentPeriodAndFetchesGrades() = runTest {

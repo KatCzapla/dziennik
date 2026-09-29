@@ -210,6 +210,12 @@ class MessagesSessionManagerTest {
         ): MessageDetailsDto =
             error("not used")
 
+        override suspend fun downloadAttachment(
+            context: MessagesSessionContext,
+            url: String,
+            destination: java.io.File,
+        ): String? = error("not used")
+
         override suspend fun markMessageAsRead(
             context: MessagesSessionContext,
             apiGlobalKey: String,

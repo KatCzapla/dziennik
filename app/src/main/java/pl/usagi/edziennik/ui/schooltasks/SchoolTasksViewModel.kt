@@ -1,6 +1,7 @@
 package pl.usagi.edziennik.ui.schooltasks
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,7 @@ import pl.usagi.edziennik.domain.time.clampedSchoolWeekStart
 import pl.usagi.edziennik.domain.time.currentSchoolYearRange
 import pl.usagi.edziennik.domain.time.isSelectableSchoolDate
 import pl.usagi.edziennik.repository.SchoolTasksRepository
+import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 import java.time.Clock
 import java.time.LocalDate
 import javax.inject.Inject
@@ -25,16 +27,25 @@ class SchoolTasksViewModel @Inject constructor(
     private val schoolTasksRepository: SchoolTasksRepository,
     private val activeStudentManager: ActiveStudentManager,
     private val clock: Clock,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
     private val schoolYearRange = currentSchoolYearRange(LocalDate.now(clock))
+    private val navigationTarget = SchoolTaskNavigationTarget.from(savedStateHandle)
     private val _uiState = MutableStateFlow(
         SchoolTasksUiState(
             schoolYearRange = schoolYearRange,
-            selectedDate = initialSchoolTasksDate(LocalDate.now(clock), schoolYearRange),
+            selectedDate = navigationTarget?.date?.takeIf { it.isSelectableSchoolDate(schoolYearRange) }
+                ?: initialSchoolTasksDate(LocalDate.now(clock), schoolYearRange),
+            navigationTarget = navigationTarget.takeUnless { savedStateHandle.get<Boolean>("taskTargetConsumed") == true },
         ),
     )
     val uiState: StateFlow<SchoolTasksUiState> = _uiState.asStateFlow()
     private var loadedWeek: WeekRange? = null
+
+    fun navigationTargetShown() {
+        savedStateHandle["taskTargetConsumed"] = true
+        _uiState.update { it.copy(navigationTarget = null) }
+    }
 
     init {
         observeStudents()

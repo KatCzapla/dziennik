@@ -1,6 +1,7 @@
 package pl.usagi.edziennik.network.messages
 
 import pl.usagi.edziennik.domain.MessageMailboxType
+import java.io.File
 import javax.inject.Inject
 
 interface MessagesRemoteDataSource {
@@ -27,6 +28,8 @@ interface MessagesRemoteDataSource {
     ): List<pl.usagi.edziennik.dto.ReceivedMessageDto>
 
     suspend fun getMessageDetails(apiGlobalKey: String): pl.usagi.edziennik.dto.MessageDetailsDto
+
+    suspend fun downloadAttachment(url: String, destination: File): String?
 
     suspend fun markMessageAsRead(apiGlobalKey: String)
 }
@@ -79,6 +82,11 @@ class MessagesDataSource @Inject constructor(
             context = context,
             apiGlobalKey = apiGlobalKey,
         )
+    }
+
+    override suspend fun downloadAttachment(url: String, destination: File): String? {
+        val context = messagesSessionManager.ensureMessagesSession()
+        return messagesApiClient.downloadAttachment(context, url, destination)
     }
 
     override suspend fun markMessageAsRead(apiGlobalKey: String) {

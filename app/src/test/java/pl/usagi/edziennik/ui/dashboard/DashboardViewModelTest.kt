@@ -456,6 +456,8 @@ class DashboardViewModelTest {
         override suspend fun getMessageDetails(apiGlobalKey: String): MessageDetails =
             error("not used")
 
+        override suspend fun downloadAttachment(url: String, destination: java.io.File): String? = error("not used")
+
         override suspend fun markMessageAsRead(apiGlobalKey: String) = Unit
 
         fun emitUnreadInvalidation() {

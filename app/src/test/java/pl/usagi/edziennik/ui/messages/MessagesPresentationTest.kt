@@ -10,6 +10,14 @@ import java.time.LocalDateTime
 
 class MessagesPresentationTest {
     @Test
+    fun usesServerMimeTypeOrFileExtensionAndFallsBackForUnknownType() {
+        assertEquals("application/pdf", attachmentMimeType("application/pdf; charset=binary", "notes.bin"))
+        assertEquals("application/pdf", attachmentMimeType(null, "notes.pdf"))
+        assertEquals("*/*", attachmentMimeType(null, "notes.unknownextension"))
+        assertEquals("*/*", attachmentMimeType("application/octet-stream", "notes.unknownextension"))
+    }
+
+    @Test
     fun formatsTodayMessageAsTime() {
         val item = message(
             date = LocalDateTime.of(2026, 9, 14, 18, 32),

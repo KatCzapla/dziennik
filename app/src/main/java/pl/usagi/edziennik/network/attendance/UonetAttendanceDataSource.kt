@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import pl.usagi.edziennik.dto.AttendanceResponseDto
+import pl.usagi.edziennik.dto.AttendanceExcusesResponseDto
 import pl.usagi.edziennik.dto.AttendanceStatisticsDto
 import pl.usagi.edziennik.dto.AttendanceSubjectDto
 import pl.usagi.edziennik.network.UonetApiClient
@@ -46,6 +47,26 @@ class UonetAttendanceDataSource @Inject constructor(
 
         try {
             apiClient.get(url, ListSerializer(AttendanceSubjectDto.serializer()))
+        } catch (failure: UonetApiClient.Failure) {
+            throw failure.toAttendanceFetchException()
+        }
+    }
+
+    suspend fun getExcuses(
+        studentKey: String,
+        dateFrom: String,
+        dateTo: String,
+    ): AttendanceExcusesResponseDto = withContext(Dispatchers.IO) {
+        val url = API_URL.toHttpUrl()
+            .newBuilder()
+            .addPathSegment("Usprawiedliwienia")
+            .addQueryParameter("key", studentKey)
+            .addQueryParameter("dataOd", dateFrom)
+            .addQueryParameter("dataDo", dateTo)
+            .build()
+
+        try {
+            apiClient.get(url, AttendanceExcusesResponseDto.serializer())
         } catch (failure: UonetApiClient.Failure) {
             throw failure.toAttendanceFetchException()
         }

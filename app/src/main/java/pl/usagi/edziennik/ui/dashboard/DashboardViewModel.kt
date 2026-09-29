@@ -194,7 +194,7 @@ class DashboardViewModel @Inject constructor(
                 val period = gradesRepository.getClassificationPeriods(student)
                     .currentPeriodOrFallback()
                     ?: return@runCatching emptyList()
-                gradesRepository.getGrades(student, period).toDashboardGrades()
+                gradesRepository.getGrades(student, period).toDashboardGrades(periodId = period.id)
             }.onSuccess { grades ->
                 if (student.isStillActive()) {
                     _uiState.update { state ->

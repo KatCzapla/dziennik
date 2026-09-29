@@ -5,6 +5,7 @@ import pl.usagi.edziennik.domain.Mailbox
 import pl.usagi.edziennik.domain.MessageDetails
 import pl.usagi.edziennik.domain.MessageMailboxType
 import pl.usagi.edziennik.domain.ReceivedMessage
+import java.io.File
 
 interface MessagesRepository {
     val unreadCountInvalidations: Flow<Unit>
@@ -30,6 +31,8 @@ interface MessagesRepository {
     ): ReceivedMessagesPage
 
     suspend fun getMessageDetails(apiGlobalKey: String): MessageDetails
+
+    suspend fun downloadAttachment(url: String, destination: File): String?
 
     suspend fun markMessageAsRead(apiGlobalKey: String)
 

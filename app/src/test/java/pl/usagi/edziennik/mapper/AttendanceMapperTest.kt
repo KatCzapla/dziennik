@@ -7,13 +7,71 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import pl.usagi.edziennik.domain.AttendanceStatus
+import pl.usagi.edziennik.domain.AttendanceExcuseStatus
 import pl.usagi.edziennik.dto.AttendanceEntryDto
 import pl.usagi.edziennik.dto.AttendanceStatisticsDto
+import pl.usagi.edziennik.dto.AttendanceExcusesResponseDto
 import pl.usagi.edziennik.dto.AttendanceSubjectDto
 import java.time.LocalDate
 import java.time.LocalTime
 
 class AttendanceMapperTest {
+    @Test
+    fun excuseStatusesKeepConfirmedAndUnknownValues() {
+        val response = Json { ignoreUnknownKeys = true }.decodeFromString<AttendanceExcusesResponseDto>(
+            """
+                {
+                  "usprawiedliwieniaAktywne": true,
+                  "usprawiedliwienia": [
+                    {"status": 0, "dzien": "2026-09-15T00:00:00+02:00", "idPoraLekcji": 1568},
+                    {"status": 1, "dzien": "2026-09-15T00:00:00+02:00", "idPoraLekcji": 1569},
+                    {"status": 999, "dzien": "2026-09-15T00:00:00+02:00", "idPoraLekcji": 1570}
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        val excuses = response.toDomainExcuses()
+
+        assertEquals(AttendanceExcuseStatus.Pending, excuses[0].status)
+        assertEquals(AttendanceExcuseStatus.Approved, excuses[1].status)
+        assertEquals(AttendanceExcuseStatus.Unknown(999), excuses[2].status)
+        assertEquals(LocalDate.of(2026, 9, 15), excuses[0].day)
+    }
+
+    @Test
+    fun matchesExcuseOnlyByDayAndLessonTimeId() {
+        val entries = listOf(
+            attendanceDto(date = "2026-09-15T00:00:00+02:00", lessonTimeId = 1568),
+            attendanceDto(date = "2026-09-16T00:00:00+02:00", lessonTimeId = 1568),
+            attendanceDto(date = "2026-09-15T00:00:00+02:00", lessonTimeId = 1569),
+        ).toDomainAttendance()
+        val excuses = Json.decodeFromString<AttendanceExcusesResponseDto>(
+            """{"usprawiedliwienia":[{"status":0,"dzien":"2026-09-15T00:00:00+02:00","idPoraLekcji":1568}]}""",
+        ).toDomainExcuses()
+
+        val result = entries.withExcuses(excuses)
+        val byLesson = result.associateBy { it.date to it.lessonTimeId }
+
+        assertEquals(
+            AttendanceExcuseStatus.Pending,
+            byLesson[LocalDate.of(2026, 9, 15) to 1568]?.excuseStatus,
+        )
+        assertNull(byLesson[LocalDate.of(2026, 9, 16) to 1568]?.excuseStatus)
+        assertNull(byLesson[LocalDate.of(2026, 9, 15) to 1569]?.excuseStatus)
+        assertEquals(entries.map { it.status }, result.map { it.status })
+    }
+
+    @Test
+    fun emptyExcusesDoNotChangeAttendance() {
+        val entries = listOf(attendanceDto()).toDomainAttendance()
+        val excuses = Json.decodeFromString<AttendanceExcusesResponseDto>(
+            """{"usprawiedliwienia":[]}""",
+        ).toDomainExcuses()
+
+        assertEquals(entries, entries.withExcuses(excuses))
+    }
+
     @Test
     fun mapsSubjectsIncludingAllSubjectsId() {
         val payload = """[{"nazwa":"Wszystkie","id":-1},{"nazwa":"Język polski","id":7867}]"""

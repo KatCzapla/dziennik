@@ -10,6 +10,8 @@ import pl.usagi.edziennik.domain.TimetableEntry
 import pl.usagi.edziennik.ui.attendance.label
 import pl.usagi.edziennik.ui.grades.recentGrades
 import pl.usagi.edziennik.ui.schooltasks.typeLabel
+import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
+import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -37,7 +39,8 @@ data class DashboardLesson(
 data class DashboardGrade(
     val value: String,
     val subjectName: String,
-    val changedSinceLastLogin: Boolean
+    val changedSinceLastLogin: Boolean,
+    val target: GradeNavigationTarget,
 )
 
 data class DashboardAttendanceEntry(
@@ -51,6 +54,7 @@ data class DashboardTask(
     val typeLabel: String,
     val subject: String?,
     val description: String?,
+    val target: SchoolTaskNavigationTarget,
 )
 
 fun List<TimetableEntry>.toDashboardLessons(
@@ -79,13 +83,19 @@ fun TimetableEntry.isCurrentLesson(
         !now.toLocalTime().isBefore(startTime) &&
         now.toLocalTime().isBefore(endTime)
 
-fun Grades.toDashboardGrades(limit: Int = 3): List<DashboardGrade> =
+fun Grades.toDashboardGrades(periodId: Int, limit: Int = 3): List<DashboardGrade> =
     recentGrades(limit)
         .map { recentGrade ->
             DashboardGrade(
                 value = recentGrade.grade.value,
                 subjectName = recentGrade.subjectName,
                 changedSinceLastLogin = recentGrade.grade.changedSinceLastLogin,
+                target = GradeNavigationTarget(
+                    periodId = periodId,
+                    subjectPosition = recentGrade.subjectPosition,
+                    columnId = recentGrade.grade.columnId,
+                    gradeIndex = recentGrade.gradeIndex,
+                ),
             )
         }
 
@@ -115,6 +125,7 @@ fun List<SchoolTask>.toDashboardTasks(
                 typeLabel = task.type.typeLabel(),
                 subject = task.subject,
                 description = task.details?.description?.takeIf { it.isNotBlank() },
+                target = SchoolTaskNavigationTarget(task.id, task.rawType, task.date),
             )
         }
 

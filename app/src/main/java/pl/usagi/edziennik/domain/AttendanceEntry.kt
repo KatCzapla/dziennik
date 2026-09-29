@@ -13,6 +13,7 @@ data class AttendanceEntry(
     val endTime: LocalTime,
     val subject: String?,
     val teacher: String?,
+    val excuseStatus: AttendanceExcuseStatus? = null,
 )
 
 sealed interface AttendanceStatus {
@@ -29,6 +30,18 @@ sealed interface AttendanceStatus {
         val description: String? = null,
     ) : AttendanceStatus
 }
+
+sealed interface AttendanceExcuseStatus {
+    data object Pending : AttendanceExcuseStatus
+    data object Approved : AttendanceExcuseStatus
+    data class Unknown(val rawValue: Int) : AttendanceExcuseStatus
+}
+
+data class AttendanceExcuse(
+    val day: LocalDate,
+    val lessonTimeId: Int,
+    val status: AttendanceExcuseStatus,
+)
 
 data class AttendanceSubject(
     val id: Int,

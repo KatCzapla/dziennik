@@ -1,5 +1,6 @@
 package pl.usagi.edziennik.ui.schooltasks
 
+import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -14,6 +15,7 @@ import pl.usagi.edziennik.domain.SchoolTaskDetails
 import pl.usagi.edziennik.domain.SchoolTaskType
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.repository.SchoolTasksRepository
+import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 import java.time.Clock
 import java.time.LocalDate
 import java.time.ZoneId
@@ -22,6 +24,33 @@ import java.time.ZoneId
 class SchoolTasksViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+
+    @Test
+    fun homeworkAndTestNavigationLoadTargetWeekAndKeepExistingDetails() = runTest {
+        for (rawType in listOf(4, 2)) {
+            val date = LocalDate.of(2026, 9, 22)
+            val manager = ActiveStudentManager()
+            val repository = FakeSchoolTasksRepository(manager)
+            repository.response = listOf(schoolTask(date, description = "Opis szczegółów").copy(
+                id = 72,
+                rawType = rawType,
+                type = if (rawType == 4) SchoolTaskType.Homework else SchoolTaskType.Quiz,
+            ))
+            val viewModel = SchoolTasksViewModel(repository, manager, fixedClock(), SavedStateHandle(mapOf(
+                "taskId" to "72", "taskType" to rawType.toString(), "taskDate" to date.toString(),
+            )))
+            manager.initialize(listOf(firstStudent))
+            advanceUntilIdle()
+
+            assertEquals(listOf(Request("first-key", LocalDate.of(2026, 9, 21), LocalDate.of(2026, 9, 25))), repository.requests)
+            val state = viewModel.uiState.value
+            assertEquals(SchoolTaskNavigationTarget(72, rawType, date), state.navigationTarget)
+            assertEquals(1, state.navigationTarget?.let(state.dayGroups::targetItemIndex))
+            assertEquals("Opis szczegółów", state.weekTasks.single().details?.description)
+            viewModel.navigationTargetShown()
+            assertEquals(null, viewModel.uiState.value.navigationTarget)
+        }
+    }
 
     @Test
     fun initialLoadRequestsCurrentWeekInsideSchoolYear() = runTest {
@@ -34,6 +63,7 @@ class SchoolTasksViewModelTest {
 
         assertEquals(listOf(Request("first-key", LocalDate.of(2026, 9, 7), LocalDate.of(2026, 9, 11))), repository.requests)
         assertEquals(false, viewModel.uiState.value.isLoading)
+        assertEquals(null, viewModel.uiState.value.navigationTarget)
     }
 
     @Test

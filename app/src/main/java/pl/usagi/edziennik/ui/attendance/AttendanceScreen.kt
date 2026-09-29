@@ -510,18 +510,27 @@ private fun AttendanceRow(entry: AttendanceEntry) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = entry.status.label(),
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                color = entry.status.color(),
-            )
-            entry.teacher?.let { teacher ->
+            entry.teacher
+                ?.takeIf { it.isNotBlank() }
+                ?.let { teacher ->
                 Text(
                     text = teacher,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = entry.status.label(),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = entry.status.color(),
+            )
+            entry.excuseStatus?.let { excuseStatus ->
+                Text(
+                    text = excuseStatus.label(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

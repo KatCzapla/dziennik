@@ -60,3 +60,16 @@ data class AttendanceMonthStatisticsDto(
     @SerialName("miesiac") val month: Int,
     @SerialName("wartosc") val value: Int,
 )
+
+@Serializable
+data class AttendanceExcusesResponseDto(
+    @SerialName("usprawiedliwienia")
+    val excuses: List<AttendanceExcuseDto> = emptyList(),
+)
+
+@Serializable
+data class AttendanceExcuseDto(
+    @SerialName("status") val status: Int,
+    @SerialName("dzien") val day: String? = null,
+    @SerialName("idPoraLekcji") val lessonTimeId: Int? = null,
+)

@@ -10,6 +10,7 @@ import pl.usagi.edziennik.mapper.toDomain
 import pl.usagi.edziennik.network.messages.MessagesRemoteDataSource
 import pl.usagi.edziennik.network.messages.MessagesSessionException
 import java.time.format.DateTimeParseException
+import java.io.File
 import javax.inject.Inject
 
 class UonetMessagesRepository @Inject constructor(
@@ -59,6 +60,11 @@ class UonetMessagesRepository @Inject constructor(
     override suspend fun getMessageDetails(apiGlobalKey: String): MessageDetails =
         runCatchingMessages {
             dataSource.getMessageDetails(apiGlobalKey).toDomain()
+        }
+
+    override suspend fun downloadAttachment(url: String, destination: File): String? =
+        runCatchingMessages {
+            dataSource.downloadAttachment(url, destination)
         }
 
     override suspend fun markMessageAsRead(apiGlobalKey: String) {

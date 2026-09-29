@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,6 +41,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -58,6 +67,7 @@ import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.components.EmptyState
 import pl.usagi.edziennik.ui.components.ErrorState
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
+import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
 import java.math.BigDecimal
 import kotlin.text.isNotBlank
 
@@ -65,9 +75,13 @@ import kotlin.text.isNotBlank
 fun GradesRoute(
     onBack: () -> Unit,
     onOpenSubject: (Int) -> Unit,
+    onOpenTarget: (GradeNavigationTarget) -> Unit,
     viewModel: GradesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
+    LaunchedEffect(state.grades, state.isLoading) {
+        viewModel.consumeNavigationTarget()?.let(onOpenTarget)
+    }
 
     GradesScreen(
         state = state,
@@ -84,12 +98,16 @@ fun GradesSubjectRoute(
     subjectPosition: Int,
     onBack: () -> Unit,
     viewModel: GradesViewModel,
+    targetColumnId: Int? = null,
+    targetGradeIndex: Int? = null,
 ) {
     val state by viewModel.uiState.collectAsState()
     GradesSubjectScreen(
         subject = viewModel.subjectByPosition(subjectPosition),
         showAverageAndPoints = state.grades?.settings?.showAverageAndPoints == true,
         onBack = onBack,
+        targetColumnId = targetColumnId,
+        targetGradeIndex = targetGradeIndex,
     )
 }
 
@@ -450,8 +468,16 @@ private fun GradesSubjectScreen(
     subject: SubjectGrades?,
     showAverageAndPoints: Boolean,
     onBack: () -> Unit,
+    targetColumnId: Int?,
+    targetGradeIndex: Int?,
 ) {
     val spacing = EDziennikTheme.spacing
+    val listState = rememberLazyListState()
+    var targetShown by rememberSaveable(targetColumnId, targetGradeIndex) { mutableStateOf(false) }
+    LaunchedEffect(subject?.position, targetColumnId) {
+        val index = subject?.columns?.indexOfFirst { it.id == targetColumnId } ?: -1
+        if (index >= 0 && !targetShown) listState.scrollToItem(index + 2)
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -488,6 +514,7 @@ private fun GradesSubjectScreen(
         }
 
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
@@ -534,6 +561,8 @@ private fun GradesSubjectScreen(
                     GradeColumnSection(
                         column = column,
                         includeGradeWeight = subject.includeGradeWeight,
+                        targetGradeIndex = targetGradeIndex.takeIf { targetColumnId == column.id && !targetShown },
+                        onTargetShown = { targetShown = true },
                     )
                 }
             }
@@ -701,9 +730,11 @@ private fun AverageAndPoints(subject: SubjectGrades) {
 private fun GradeColumnSection(
     column: GradeColumn,
     includeGradeWeight: Boolean,
+    targetGradeIndex: Int?,
+    onTargetShown: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
-    val grades = column.grades.sortedByDescending { it.date }
+    val grades = column.grades.withIndex().sortedByDescending { it.value.date }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -717,12 +748,21 @@ private fun GradeColumnSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            grades.forEachIndexed { index, grade ->
+            grades.forEachIndexed { index, indexedGrade ->
+                val requester = remember { BringIntoViewRequester() }
+                LaunchedEffect(targetGradeIndex) {
+                    if (targetGradeIndex == indexedGrade.index) {
+                        withFrameNanos { }
+                        requester.bringIntoView()
+                        onTargetShown()
+                    }
+                }
                 GradeDetailsRow(
                     name = column.name,
                     category = column.category,
-                    grade = grade,
+                    grade = indexedGrade.value,
                     includeGradeWeight = includeGradeWeight,
+                    modifier = Modifier.bringIntoViewRequester(requester),
                 )
 
                 if (index != grades.lastIndex) {
@@ -764,11 +804,12 @@ private fun GradeDetailsRow(
     category: String,
     grade: Grade,
     includeGradeWeight: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     val spacing = EDziennikTheme.spacing
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
             .heightIn(min = 44.dp),

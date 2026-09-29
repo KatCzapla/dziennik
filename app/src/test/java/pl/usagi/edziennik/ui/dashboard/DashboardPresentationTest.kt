@@ -18,12 +18,44 @@ import pl.usagi.edziennik.domain.SubjectGrades
 import pl.usagi.edziennik.domain.TimetableChange
 import pl.usagi.edziennik.domain.TimetableChangeKind
 import pl.usagi.edziennik.domain.TimetableEntry
+import pl.usagi.edziennik.dto.TimetableChangeDto
+import pl.usagi.edziennik.dto.TimetableEntryDto
+import pl.usagi.edziennik.mapper.toDomain
+import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
+import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 import pl.usagi.edziennik.ui.messages.dashboardUnreadBadgeLabel
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 
 class DashboardPresentationTest {
+    @Test
+    fun dashboardTasksKeepDistinctHomeworkAndTestNavigationTargets() {
+        val date = LocalDate.of(2026, 9, 14)
+        val presented = listOf(
+            task(date, 72, SchoolTaskType.Homework),
+            task(date, 72, SchoolTaskType.Quiz),
+        ).toDashboardTasks(date)
+
+        assertEquals(SchoolTaskNavigationTarget(72, 4, date), presented[0].target)
+        assertEquals(SchoolTaskNavigationTarget(72, 2, date), presented[1].target)
+    }
+
+    @Test
+    fun dashboardGradeKeepsOriginalIndexBeforeSortingByDate() {
+        val older = grade(LocalDate.of(2026, 9, 10), "3", "Matematyka")
+        val newer = grade(LocalDate.of(2026, 9, 14), "5", "Matematyka")
+        val data = grades(older)
+        val subject = data.subjects.single()
+        val column = subject.columns.single().copy(id = 1, grades = listOf(older, newer))
+        val presented = data.copy(subjects = listOf(subject.copy(columns = listOf(column))))
+            .toDashboardGrades(periodId = 123)
+
+        assertEquals("5", presented.first().value)
+        assertEquals(GradeNavigationTarget(123, 0, 1, 1), presented.first().target)
+        assertEquals(GradeNavigationTarget(123, 0, 1, 0), presented.last().target)
+    }
+
     @Test
     fun greetingUsesLoggedInUserName() {
         assertEquals("Dzień dobry, Karolina", dashboardGreeting(" Kowalska-Nowak Karolina "))
@@ -64,6 +96,51 @@ class DashboardPresentationTest {
         )
 
         assertEquals(9, lessons.size)
+    }
+
+    @Test
+    fun dashboardKeepsOrdinaryLessonWithoutCancellationMarker() {
+        val date = LocalDate.of(2026, 9, 14)
+        val presented = listOf(lesson(date = date)).toDashboardLessons(
+            displayedDate = date,
+            now = LocalDateTime.of(date, LocalTime.of(7, 0)),
+        ).single()
+
+        assertEquals("8:20", presented.startTime)
+        assertEquals("Matematyka", presented.subject)
+        assertEquals("201", presented.room)
+        assertFalse(presented.isCancelled)
+    }
+
+    @Test
+    fun bothMappedCancellationTypesHaveSameDashboardPresentation() {
+        val date = LocalDate.of(2026, 9, 14)
+        val now = LocalDateTime.of(date, LocalTime.of(7, 0))
+
+        val presented = listOf(1, 4).map { changeType ->
+            TimetableEntryDto(
+                date = "2026-09-14T00:00:00+02:00",
+                timeFrom = "2026-09-14T08:20:00+02:00",
+                timeTo = "2026-09-14T09:05:00+02:00",
+                subject = "Matematyka",
+                room = "201",
+                changes = listOf(
+                    TimetableChangeDto(
+                        changeType = changeType,
+                        absenceInformation = "Szczegóły odwołania",
+                    ),
+                ),
+            ).toDomain()
+        }.toDashboardLessons(displayedDate = date, now = now)
+
+        assertEquals(2, presented.size)
+        assertEquals(presented[0], presented[1])
+        presented.forEach { lesson ->
+            assertTrue(lesson.isCancelled)
+            assertEquals("8:20", lesson.startTime)
+            assertEquals("Matematyka", lesson.subject)
+            assertEquals("201", lesson.room)
+        }
     }
 
     @Test
@@ -122,7 +199,7 @@ class DashboardPresentationTest {
             grade(date = LocalDate.of(2026, 9, 12), value = "+", subject = "Język polski"),
             grade(date = LocalDate.of(2026, 9, 11), value = "4+", subject = "Historia"),
             grade(date = LocalDate.of(2026, 9, 9), value = "3", subject = "Biologia"),
-        ).toDashboardGrades()
+        ).toDashboardGrades(periodId = 123)
 
         assertEquals(listOf("+", "4+", "5"), grades.map { it.value })
         assertEquals(listOf("Język polski", "Historia", "Matematyka"), grades.map { it.subjectName })

@@ -3,9 +3,26 @@ package pl.usagi.edziennik.ui.attendance
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import pl.usagi.edziennik.domain.AttendanceStatus
+import pl.usagi.edziennik.domain.AttendanceExcuseStatus
 import java.time.LocalDate
 
 class AttendancePresentationTest {
+    @Test
+    fun excuseLabelsDistinguishConfirmedAndUnknownStatuses() {
+        assertEquals(
+            "Usprawiedliwienie oczekuje na zatwierdzenie",
+            AttendanceExcuseStatus.Pending.label(),
+        )
+        assertEquals(
+            "Usprawiedliwienie zatwierdzone",
+            AttendanceExcuseStatus.Approved.label(),
+        )
+        assertEquals(
+            "Usprawiedliwienie: status 999",
+            AttendanceExcuseStatus.Unknown(999).label(),
+        )
+    }
+
     @Test
     fun confirmedStatusesHaveReadableLabels() {
         val expected = mapOf(

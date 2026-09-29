@@ -50,6 +50,8 @@ import pl.usagi.edziennik.network.session.LoggedInUser
 import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.messages.dashboardUnreadBadgeLabel
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
+import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
+import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 
 @Composable
 fun DashboardRoute(
@@ -58,6 +60,8 @@ fun DashboardRoute(
     onOpenAttendance: () -> Unit,
     onOpenGrades: () -> Unit,
     onOpenSchoolTasks: () -> Unit,
+    onOpenGrade: (GradeNavigationTarget) -> Unit,
+    onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
     onLogout: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel(),
@@ -74,6 +78,8 @@ fun DashboardRoute(
         onOpenAttendance = onOpenAttendance,
         onOpenGrades = onOpenGrades,
         onOpenSchoolTasks = onOpenSchoolTasks,
+        onOpenGrade = onOpenGrade,
+        onOpenTask = onOpenTask,
         onOpenMessages = onOpenMessages,
         onLogout = onLogout,
     )
@@ -90,6 +96,8 @@ private fun DashboardScreen(
     onOpenAttendance: () -> Unit,
     onOpenGrades: () -> Unit,
     onOpenSchoolTasks: () -> Unit,
+    onOpenGrade: (GradeNavigationTarget) -> Unit,
+    onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -171,6 +179,7 @@ private fun DashboardScreen(
                 GradesSection(
                     section = state.recentGrades,
                     onOpenGrades = onOpenGrades,
+                    onOpenGrade = onOpenGrade,
                 )
             }
 
@@ -178,6 +187,7 @@ private fun DashboardScreen(
                 SchoolTasksSection(
                     section = state.upcomingTasks,
                     onOpenSchoolTasks = onOpenSchoolTasks,
+                    onOpenTask = onOpenTask,
                 )
             }
 
@@ -450,16 +460,29 @@ private fun DashboardLessonRow(lesson: DashboardLesson) {
                 )
             }
         }
-        Text(
-            text = lesson.subject,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyLarge.copy(
-                fontWeight = if (lesson.isCancelled) FontWeight.Normal else FontWeight.Medium,
-            ),
-            color = contentColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(spacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = lesson.subject,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = if (lesson.isCancelled) FontWeight.Normal else FontWeight.Medium,
+                    ),
+                    color = contentColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (lesson.isCancelled) {
+                Text(
+                    text = "Odwołane",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
         Text(
             text = lesson.room.orEmpty(),
             style = MaterialTheme.typography.bodyMedium,
@@ -522,6 +545,7 @@ private fun DashboardAttendanceRow(entry: DashboardAttendanceEntry) {
 private fun GradesSection(
     section: DashboardSection<List<DashboardGrade>>,
     onOpenGrades: () -> Unit,
+    onOpenGrade: (GradeNavigationTarget) -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
 
@@ -538,7 +562,7 @@ private fun GradesSection(
             Column(verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.sm)) {
                 grades.forEach { grade ->
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().clickable { onOpenGrade(grade.target) },
                         horizontalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.md),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -594,6 +618,7 @@ private fun DashboardGradeBadge(value: String) {
 private fun SchoolTasksSection(
     section: DashboardSection<List<DashboardTask>>,
     onOpenSchoolTasks: () -> Unit,
+    onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
 ) {
     DashboardSectionLayout(
         title = "SPRAWDZIANY I ZADANIA",
@@ -607,7 +632,10 @@ private fun SchoolTasksSection(
         ) { tasks ->
             Column(verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.md)) {
                 tasks.forEach { task ->
-                    Column(verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.xxs)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().clickable { onOpenTask(task.target) },
+                        verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.xxs),
+                    ) {
                         Text(
                             text = task.dateLabel,
                             style = MaterialTheme.typography.labelMedium,

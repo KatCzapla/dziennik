@@ -6,8 +6,25 @@ import pl.usagi.edziennik.domain.SchoolTask
 import pl.usagi.edziennik.domain.SchoolTaskDetails
 import pl.usagi.edziennik.domain.SchoolTaskType
 import java.time.LocalDate
+import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 
 class SchoolTasksPresentationTest {
+    @Test
+    fun targetIndexMatchesIdTypeAndDateIncludingDayHeaders() {
+        val monday = LocalDate.of(2026, 9, 14)
+        val tuesday = monday.plusDays(1)
+        val groups = listOf(
+            schoolTask(monday, SchoolTaskType.Quiz, 1),
+            schoolTask(tuesday, SchoolTaskType.Homework, 1),
+            schoolTask(tuesday, SchoolTaskType.Quiz, 1),
+        ).groupBySchoolDay()
+
+        assertEquals(4, groups.targetItemIndex(SchoolTaskNavigationTarget(1, 4, tuesday)))
+        assertEquals(3, groups.targetItemIndex(SchoolTaskNavigationTarget(1, 2, tuesday)))
+        assertEquals(null, groups.targetItemIndex(SchoolTaskNavigationTarget(999, 4, tuesday)))
+        assertEquals(null, groups.targetItemIndex(SchoolTaskNavigationTarget(1, 4, monday)))
+    }
+
     @Test
     fun tasksAreGroupedByDayAndSortedForPresentation() {
         val monday = LocalDate.of(2026, 9, 14)

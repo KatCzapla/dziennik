@@ -10,10 +10,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import org.junit.Test
 import pl.usagi.edziennik.MainDispatcherRule
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.Mailbox
+import pl.usagi.edziennik.domain.MessageAttachment
 import pl.usagi.edziennik.domain.MessageDetails
 import pl.usagi.edziennik.domain.MessageMailboxType
 import pl.usagi.edziennik.domain.ReceivedMessage
@@ -25,6 +27,43 @@ import java.time.LocalDateTime
 class MessagesViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+    @get:Rule
+    val temporaryFolder = TemporaryFolder()
+
+    @Test
+    fun attachmentDownloadReturnsMimeTypeAndKeepsMessagesState() = runTest {
+        val repository = FakeMessagesRepository(
+            pages = mutableMapOf(0 to ReceivedMessagesPage(listOf(message(1)), endReached = true)),
+        )
+        val viewModel = MessagesViewModel(repository, ActiveStudentManager())
+        advanceUntilIdle()
+        val before = viewModel.uiState.value.messages
+        val destination = temporaryFolder.newFile("attachment.pdf")
+        var result: Result<String?>? = null
+
+        viewModel.downloadAttachment(MessageAttachment("/files/a.pdf", "a.pdf"), destination) { result = it }
+        advanceUntilIdle()
+
+        assertEquals(listOf("/files/a.pdf"), repository.attachmentRequests)
+        assertEquals("application/pdf", result?.getOrNull())
+        assertEquals(before, viewModel.uiState.value.messages)
+    }
+
+    @Test
+    fun failedAttachmentDownloadReportsFailureAndDeletesPartialFile() = runTest {
+        val repository = FakeMessagesRepository()
+        repository.failAttachment = true
+        val viewModel = MessagesViewModel(repository, ActiveStudentManager())
+        advanceUntilIdle()
+        val destination = temporaryFolder.newFile("partial.pdf")
+        var result: Result<String?>? = null
+
+        viewModel.downloadAttachment(MessageAttachment("/files/a.pdf", "a.pdf"), destination) { result = it }
+        advanceUntilIdle()
+
+        assertTrue(result?.isFailure == true)
+        assertFalse(destination.exists())
+    }
 
     @Test
     fun initialLoadFetchesFirstPage() = runTest {
@@ -444,6 +483,8 @@ class MessagesViewModelTest {
         val receivedRequests = mutableListOf<ReceivedRequest>()
         val detailRequests = mutableListOf<String>()
         val markReadRequests = mutableListOf<String>()
+        val attachmentRequests = mutableListOf<String>()
+        var failAttachment = false
         var failNextPageForLastId: Int? = null
         var failDetailsForApiKey: String? = null
         var failMarkReadForApiKey: String? = null
@@ -477,6 +518,12 @@ class MessagesViewModelTest {
             detailRequests += apiGlobalKey
             if (apiGlobalKey == failDetailsForApiKey) error("details failed")
             return messageDetails(apiGlobalKey)
+        }
+
+        override suspend fun downloadAttachment(url: String, destination: java.io.File): String? {
+            attachmentRequests += url
+            if (failAttachment) error("download failed")
+            return "application/pdf"
         }
 
         override suspend fun markMessageAsRead(apiGlobalKey: String) {

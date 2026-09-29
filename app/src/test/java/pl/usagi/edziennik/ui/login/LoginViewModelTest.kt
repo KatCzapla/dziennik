@@ -568,6 +568,7 @@ class LoginViewModelTest {
         ): ReceivedMessagesPage = error("Unused")
 
         override suspend fun getMessageDetails(apiGlobalKey: String): MessageDetails = error("Unused")
+        override suspend fun downloadAttachment(url: String, destination: java.io.File): String? = error("Unused")
         override suspend fun markMessageAsRead(apiGlobalKey: String) = error("Unused")
     }
 

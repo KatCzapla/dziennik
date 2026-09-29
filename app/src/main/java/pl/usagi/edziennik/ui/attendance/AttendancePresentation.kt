@@ -1,6 +1,7 @@
 package pl.usagi.edziennik.ui.attendance
 
 import pl.usagi.edziennik.domain.AttendanceStatus
+import pl.usagi.edziennik.domain.AttendanceExcuseStatus
 import pl.usagi.edziennik.domain.time.SchoolYearRange
 import pl.usagi.edziennik.domain.time.coerceInSchoolYear
 import pl.usagi.edziennik.domain.time.currentSchoolYearRange
@@ -20,6 +21,13 @@ fun AttendanceStatus.label(): String =
         AttendanceStatus.Released -> "Zwolnienie"
         is AttendanceStatus.Unknown -> description ?: rawValue?.let { "Status: $it" }
             ?: "Status nieznany"
+    }
+
+fun AttendanceExcuseStatus.label(): String =
+    when (this) {
+        AttendanceExcuseStatus.Pending -> "Usprawiedliwienie oczekuje na zatwierdzenie"
+        AttendanceExcuseStatus.Approved -> "Usprawiedliwienie zatwierdzone"
+        is AttendanceExcuseStatus.Unknown -> "Usprawiedliwienie: status $rawValue"
     }
 
 fun initialAttendanceDate(

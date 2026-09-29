@@ -1,5 +1,6 @@
 package pl.usagi.edziennik.repository
 
+import kotlinx.coroutines.CancellationException
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.AttendanceEntry
 import pl.usagi.edziennik.domain.AttendanceStatistics
@@ -7,6 +8,8 @@ import pl.usagi.edziennik.domain.AttendanceSubject
 import pl.usagi.edziennik.mapper.toDomain
 import pl.usagi.edziennik.mapper.toDomainAttendance
 import pl.usagi.edziennik.mapper.toDomainAttendanceSubjects
+import pl.usagi.edziennik.mapper.toDomainExcuses
+import pl.usagi.edziennik.mapper.withExcuses
 import pl.usagi.edziennik.network.attendance.UonetAttendanceDataSource
 import java.time.LocalDate
 import java.time.ZoneId
@@ -22,12 +25,28 @@ class UonetAttendanceRepository @Inject constructor(
     ): List<AttendanceEntry> {
         val activeStudent = activeStudentManager.requireActiveStudent(AttendanceRepositoryException.NoActiveStudent)
         val zoneId = ZoneId.systemDefault()
+        val dateFrom = from.toApiStartOfDay(zoneId)
+        val dateTo = to.toApiEndOfDay(zoneId)
 
-        return dataSource.getAttendance(
+        val entries = dataSource.getAttendance(
             studentKey = activeStudent.key,
-            dateFrom = from.toApiStartOfDay(zoneId),
-            dateTo = to.toApiEndOfDay(zoneId),
+            dateFrom = dateFrom,
+            dateTo = dateTo,
         ).classEntries.toDomainAttendance()
+
+        val excuses = try {
+            dataSource.getExcuses(
+                studentKey = activeStudent.key,
+                dateFrom = dateFrom,
+                dateTo = dateTo,
+            ).toDomainExcuses()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            emptyList()
+        }
+
+        return entries.withExcuses(excuses)
     }
 
     override suspend fun getSubjects(): List<AttendanceSubject> {

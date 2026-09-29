@@ -6,6 +6,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import pl.usagi.edziennik.ui.attendance.AttendanceRoute
 import pl.usagi.edziennik.ui.grades.GradesRoute
 import pl.usagi.edziennik.ui.grades.GradesSubjectRoute
@@ -37,6 +39,8 @@ fun EDziennikNavHost() {
                 onOpenSchoolTasks = {
                     navController.navigate("schoolTasks")
                 },
+                onOpenGrade = { target -> navController.navigate(target.route()) },
+                onOpenTask = { target -> navController.navigate(target.route()) },
                 onOpenMessages = {
                     navController.navigate("messages")
                 },
@@ -56,7 +60,10 @@ fun EDziennikNavHost() {
                 },
             )
         }
-        composable("grades") {
+        composable(
+            GRADES_ROUTE,
+            arguments = optionalArguments("periodId", "subjectPosition", "columnId", "gradeIndex"),
+        ) {
             GradesRoute(
                 onBack = {
                     navController.popBackStack()
@@ -64,11 +71,15 @@ fun EDziennikNavHost() {
                 onOpenSubject = { position ->
                     navController.navigate("grades/subject/$position")
                 },
+                onOpenTarget = { target -> navController.navigate(target.subjectRoute()) },
             )
         }
-        composable("grades/subject/{position}") { backStackEntry ->
+        composable(
+            "grades/subject/{position}?columnId={columnId}&gradeIndex={gradeIndex}",
+            arguments = optionalArguments("columnId", "gradeIndex"),
+        ) { backStackEntry ->
             val parentEntry = remember(backStackEntry) {
-                navController.getBackStackEntry("grades")
+                navController.getBackStackEntry(GRADES_ROUTE)
             }
             val viewModel: GradesViewModel = hiltViewModel(parentEntry)
             GradesSubjectRoute(
@@ -77,9 +88,14 @@ fun EDziennikNavHost() {
                     navController.popBackStack()
                 },
                 viewModel = viewModel,
+                targetColumnId = backStackEntry.arguments?.getString("columnId")?.toIntOrNull(),
+                targetGradeIndex = backStackEntry.arguments?.getString("gradeIndex")?.toIntOrNull(),
             )
         }
-        composable("schoolTasks") {
+        composable(
+            SCHOOL_TASKS_ROUTE,
+            arguments = optionalArguments("taskId", "taskType", "taskDate"),
+        ) {
             SchoolTasksRoute(
                 onBack = {
                     navController.popBackStack()
@@ -93,5 +109,13 @@ fun EDziennikNavHost() {
                 },
             )
         }
+    }
+}
+
+private fun optionalArguments(vararg names: String) = names.map { name ->
+    navArgument(name) {
+        type = NavType.StringType
+        nullable = true
+        defaultValue = null
     }
 }

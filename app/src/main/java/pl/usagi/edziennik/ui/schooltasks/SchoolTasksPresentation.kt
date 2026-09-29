@@ -8,6 +8,7 @@ import pl.usagi.edziennik.domain.time.currentSchoolYearRange
 import pl.usagi.edziennik.ui.timetable.dayMonthLabel
 import java.time.DayOfWeek
 import java.time.LocalDate
+import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 
 data class SchoolTasksDayGroup(
     val date: LocalDate,
@@ -18,6 +19,17 @@ data class SchoolTaskDetailLine(
     val label: String,
     val value: String,
 )
+
+fun List<SchoolTasksDayGroup>.targetItemIndex(target: SchoolTaskNavigationTarget): Int? {
+    var index = 0
+    for (group in this) {
+        index += 1 // Each day starts with a header in the list.
+        val taskIndex = group.tasks.indexOfFirst(target::matches)
+        if (taskIndex >= 0) return index + taskIndex
+        index += group.tasks.size
+    }
+    return null
+}
 
 fun initialSchoolTasksDate(
     today: LocalDate = LocalDate.now(),

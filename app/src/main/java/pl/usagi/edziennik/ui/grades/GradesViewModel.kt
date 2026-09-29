@@ -1,6 +1,7 @@
 package pl.usagi.edziennik.ui.grades
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,6 +14,7 @@ import pl.usagi.edziennik.domain.ClassificationPeriod
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.SubjectGrades
 import pl.usagi.edziennik.repository.GradesRepository
+import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
 import java.time.Clock
 import java.time.OffsetDateTime
 import javax.inject.Inject
@@ -22,9 +24,23 @@ class GradesViewModel @Inject constructor(
     private val gradesRepository: GradesRepository,
     private val activeStudentManager: ActiveStudentManager,
     private val clock: Clock,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(GradesUiState())
     val uiState: StateFlow<GradesUiState> = _uiState.asStateFlow()
+    private val navigationTarget = GradeNavigationTarget.from(savedStateHandle)
+
+    fun consumeNavigationTarget(): GradeNavigationTarget? {
+        if (savedStateHandle.get<Boolean>("gradeTargetConsumed") == true || _uiState.value.isLoading) return null
+        val target = navigationTarget ?: return null
+        val state = _uiState.value
+        if (state.selectedPeriod?.id != target.periodId) return null
+        val subject = state.grades?.subjectByPosition(target.subjectPosition) ?: return null
+        val column = subject.columns.firstOrNull { it.id == target.columnId } ?: return null
+        if (target.gradeIndex !in column.grades.indices) return null
+        savedStateHandle["gradeTargetConsumed"] = true
+        return target
+    }
 
     init {
         observeStudents()
@@ -105,10 +121,11 @@ class GradesViewModel @Inject constructor(
                 gradesRepository.getClassificationPeriods(student)
                     .sortedBy { it.startDate }
             }.onSuccess { periods ->
-                val selectedPeriod = chooseClassificationPeriod(
-                    periods = periods,
-                    now = OffsetDateTime.now(clock),
-                )
+                val selectedPeriod = periods.firstOrNull { it.id == navigationTarget?.periodId }
+                    ?: chooseClassificationPeriod(
+                        periods = periods,
+                        now = OffsetDateTime.now(clock),
+                    )
                 _uiState.update { state ->
                     state.copy(
                         periods = periods,

@@ -1,5 +1,8 @@
 package pl.usagi.edziennik.ui.schooltasks
 
+import android.text.SpannableString
+import android.text.style.URLSpan
+import android.text.util.Linkify
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,13 +34,20 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,6 +63,7 @@ import pl.usagi.edziennik.ui.timetable.dayMonthLabel
 import pl.usagi.edziennik.ui.timetable.polishName
 import pl.usagi.edziennik.ui.timetable.schoolWeekLabel
 import java.time.LocalDate
+import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 
 @Composable
 fun SchoolTasksRoute(
@@ -68,6 +80,7 @@ fun SchoolTasksRoute(
         onToday = viewModel::today,
         onRetry = viewModel::retry,
         onStudentSelected = viewModel::selectStudent,
+        onTargetShown = viewModel::navigationTargetShown,
     )
 }
 
@@ -80,6 +93,7 @@ private fun SchoolTasksScreen(
     onToday: () -> Unit,
     onRetry: () -> Unit,
     onStudentSelected: (Student) -> Unit,
+    onTargetShown: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
 
@@ -124,6 +138,9 @@ private fun SchoolTasksScreen(
                     SchoolTasksList(
                         dayGroups = state.dayGroups,
                         isEmpty = state.isEmpty,
+                        target = state.navigationTarget,
+                        isLoading = state.isLoading,
+                        onTargetShown = onTargetShown,
                     )
 
                     if (state.isLoading) {
@@ -237,10 +254,22 @@ private fun SchoolTasksHeader(
 private fun SchoolTasksList(
     dayGroups: List<SchoolTasksDayGroup>,
     isEmpty: Boolean,
+    target: SchoolTaskNavigationTarget?,
+    isLoading: Boolean,
+    onTargetShown: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
+    val listState = rememberLazyListState()
+    val targetIndex = target?.let(dayGroups::targetItemIndex)
+    LaunchedEffect(target, targetIndex, isLoading) {
+        if (!isLoading && targetIndex != null) {
+            listState.scrollToItem(targetIndex)
+            onTargetShown()
+        }
+    }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(spacing.lg),
     ) {
@@ -274,8 +303,8 @@ private fun SchoolTasksList(
 private fun DayHeader(date: LocalDate) {
     Text(
         text = "${date.dayOfWeek.polishName()} · ${date.dayMonthLabel()}",
-        style = MaterialTheme.typography.bodyMedium, //.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.titleMedium, //.bodyMedium, //.titleSmall,
+        color = MaterialTheme.colorScheme.onSurface //.onSurfaceVariant,
     )
 }
 
@@ -319,6 +348,28 @@ private fun SchoolTaskRow(task: SchoolTask) {
 @Composable
 private fun DetailLine(line: SchoolTaskDetailLine) {
     val spacing = EDziennikTheme.spacing
+    val linkColor = MaterialTheme.colorScheme.primary
+    val text = remember(line, linkColor) {
+        buildAnnotatedString {
+            append(line.value)
+            if (line.label == "Opis") {
+                val linkedText = SpannableString(line.value)
+                Linkify.addLinks(linkedText, Linkify.WEB_URLS)
+                linkedText.getSpans(0, linkedText.length, URLSpan::class.java).forEach { span ->
+                    addLink(
+                        LinkAnnotation.Url(
+                            url = span.url,
+                            styles = TextLinkStyles(
+                                style = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
+                            ),
+                        ),
+                        start = linkedText.getSpanStart(span),
+                        end = linkedText.getSpanEnd(span),
+                    )
+                }
+            }
+        }
+    }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(spacing.xxs),
@@ -330,7 +381,7 @@ private fun DetailLine(line: SchoolTaskDetailLine) {
             maxLines = 1,
         )
         Text(
-            text = line.value,
+            text = text,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             overflow = TextOverflow.Ellipsis,

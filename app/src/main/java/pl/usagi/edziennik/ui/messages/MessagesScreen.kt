@@ -1,11 +1,14 @@
 package pl.usagi.edziennik.ui.messages
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.text.Html
 import android.text.SpannableStringBuilder
 import android.text.method.LinkMovementMethod
 import android.text.util.Linkify
 import android.util.TypedValue
 import android.widget.TextView
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +38,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,6 +46,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,7 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import pl.usagi.edziennik.domain.MessageAttachment
@@ -62,6 +68,8 @@ import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 import java.time.LocalDate
+import java.io.File
+import java.net.URLConnection
 
 @Composable
 fun MessagesRoute(
@@ -82,6 +90,7 @@ fun MessagesRoute(
         onDetailsClosed = viewModel::closeMessageDetails,
         onMessagePageSelected = viewModel::selectMessageIndex,
         onRetryMessageDetails = viewModel::retryMessageDetails,
+        onDownloadAttachment = viewModel::downloadAttachment,
     )
 }
 
@@ -98,6 +107,7 @@ private fun MessagesScreen(
     onDetailsClosed: () -> Unit,
     onMessagePageSelected: (Int) -> Unit,
     onRetryMessageDetails: (Int) -> Unit,
+    onDownloadAttachment: (MessageAttachment, File, (Result<String?>) -> Unit) -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
     val isShowingDetails = state.isShowingDetails
@@ -122,6 +132,7 @@ private fun MessagesScreen(
                 onPageSelected = onMessagePageSelected,
                 onLoadMore = onLoadMore,
                 onRetryMessageDetails = onRetryMessageDetails,
+                onDownloadAttachment = onDownloadAttachment,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
@@ -297,6 +308,7 @@ private fun MessageDetailsPager(
     onPageSelected: (Int) -> Unit,
     onLoadMore: () -> Unit,
     onRetryMessageDetails: (Int) -> Unit,
+    onDownloadAttachment: (MessageAttachment, File, (Result<String?>) -> Unit) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val spacing = EDziennikTheme.spacing
@@ -331,6 +343,7 @@ private fun MessageDetailsPager(
                 listItem = message.toMessageListItem(LocalDate.now()),
                 pageState = state.messageDetails[message.id] ?: MessageDetailsPageState.Loading,
                 onRetry = { onRetryMessageDetails(message.id) },
+                onDownloadAttachment = onDownloadAttachment,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = spacing.lg),
@@ -350,6 +363,7 @@ private fun MessageDetailsPage(
     listItem: MessageListItem,
     pageState: MessageDetailsPageState,
     onRetry: () -> Unit,
+    onDownloadAttachment: (MessageAttachment, File, (Result<String?>) -> Unit) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val spacing = EDziennikTheme.spacing
@@ -399,7 +413,10 @@ private fun MessageDetailsPage(
 
             is MessageDetailsPageState.Loaded -> {
                 item {
-                    MessageDetailsContent(details = pageState.details)
+                    MessageDetailsContent(
+                        details = pageState.details,
+                        onDownloadAttachment = onDownloadAttachment,
+                    )
                 }
             }
         }
@@ -411,7 +428,10 @@ private fun MessageDetailsPage(
 }
 
 @Composable
-private fun MessageDetailsContent(details: MessageDetails) {
+private fun MessageDetailsContent(
+    details: MessageDetails,
+    onDownloadAttachment: (MessageAttachment, File, (Result<String?>) -> Unit) -> Unit,
+) {
     val spacing = EDziennikTheme.spacing
 
     Column(
@@ -427,7 +447,10 @@ private fun MessageDetailsContent(details: MessageDetails) {
         MessageHtmlContent(html = details.content)
 
         if (details.attachments.isNotEmpty()) {
-            AttachmentsSection(attachments = details.attachments)
+            AttachmentsSection(
+                attachments = details.attachments,
+                onDownloadAttachment = onDownloadAttachment,
+            )
         }
     }
 }
@@ -505,9 +528,14 @@ private fun MessageMetaLine(
 }
 
 @Composable
-private fun AttachmentsSection(attachments: List<MessageAttachment>) {
+private fun AttachmentsSection(
+    attachments: List<MessageAttachment>,
+    onDownloadAttachment: (MessageAttachment, File, (Result<String?>) -> Unit) -> Unit,
+) {
     val spacing = EDziennikTheme.spacing
-    val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
+    var loadingUrl by remember(attachments) { mutableStateOf<String?>(null) }
+    var errorMessage by remember(attachments) { mutableStateOf<String?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(spacing.xs)) {
         Text(
@@ -526,33 +554,93 @@ private fun AttachmentsSection(attachments: List<MessageAttachment>) {
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                val attachmentUrl = attachment.url
                 Text(
                     text = attachment.fileName,
-                    modifier = if (attachmentUrl.isNotBlank()) {
-                        Modifier.clickable { uriHandler.openUri(attachmentUrl) }
-                    } else {
-                        Modifier
+                    modifier = Modifier.clickable(enabled = loadingUrl == null) {
+                        errorMessage = null
+                        if (attachment.url.isBlank()) {
+                            errorMessage = "Nie można pobrać tego załącznika."
+                            return@clickable
+                        }
+                        val destination = try {
+                            val directory = File(context.cacheDir, "message_attachments")
+                            if (!directory.exists() && !directory.mkdirs()) error("Cache unavailable")
+                            val extension = attachment.fileName.substringAfterLast('.', "")
+                                .takeIf { it.matches(Regex("[A-Za-z0-9]{1,12}")) }
+                            File.createTempFile("attachment-", extension?.let { ".$it" } ?: ".bin", directory)
+                        } catch (_: Exception) {
+                            errorMessage = "Nie można zapisać załącznika."
+                            return@clickable
+                        }
+                        loadingUrl = attachment.url
+                        onDownloadAttachment(attachment, destination) { result ->
+                            loadingUrl = null
+                            result.onSuccess { contentType ->
+                                val mimeType = attachmentMimeType(contentType, attachment.fileName)
+                                try {
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        destination,
+                                    )
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW)
+                                            .setDataAndType(uri, mimeType)
+                                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                                    )
+                                } catch (_: ActivityNotFoundException) {
+                                    errorMessage = "Brak aplikacji do otwarcia tego typu pliku."
+                                } catch (_: Exception) {
+                                    errorMessage = "Nie można otworzyć załącznika."
+                                }
+                            }.onFailure {
+                                errorMessage = "Nie udało się pobrać załącznika. Spróbuj ponownie."
+                            }
+                        }
                     },
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        textDecoration = if (attachmentUrl.isNotBlank()) {
-                            TextDecoration.Underline
-                        } else {
-                            TextDecoration.None
-                        },
-                    ),
-                    color = if (attachmentUrl.isNotBlank()) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(textDecoration = TextDecoration.Underline),
+                    color = MaterialTheme.colorScheme.primary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
+        if (loadingUrl != null) {
+            Surface(
+                modifier = Modifier.padding(vertical = spacing.xs),
+                color = MaterialTheme.colorScheme.primary,
+                shape = MaterialTheme.shapes.small
+            ) {
+                Text(
+                    text = "Pobieranie załącznika...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.padding(vertical = spacing.xxs, horizontal = spacing.xs)
+                )
+            }
+        }
+        errorMessage?.let { message ->
+            Surface(
+                modifier = Modifier.padding(vertical = spacing.xs),
+                color = MaterialTheme.colorScheme.error,
+                shape = MaterialTheme.shapes.small
+            ) {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.padding(vertical = spacing.xxs, horizontal = spacing.xs)
+                )
+            }
+        }
     }
 }
+
+internal fun attachmentMimeType(contentType: String?, fileName: String): String =
+    contentType?.substringBefore(';')?.trim()
+        ?.takeIf { it.contains('/') && it != "application/octet-stream" }
+        ?: URLConnection.guessContentTypeFromName(fileName)
+        ?: "*/*"
 
 @Composable
 private fun MessageRow(

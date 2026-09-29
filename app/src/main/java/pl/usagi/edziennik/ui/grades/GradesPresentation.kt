@@ -14,18 +14,20 @@ data class RecentGrade(
     val subjectName: String,
     val columnName: String,
     val grade: Grade,
+    val gradeIndex: Int,
 )
 
 fun Grades.recentGrades(limit: Int = 4): List<RecentGrade> =
     subjects
         .flatMap { subject ->
             subject.columns.flatMap { column ->
-                column.grades.map { grade ->
+                column.grades.mapIndexed { index, grade ->
                     RecentGrade(
                         subjectPosition = subject.position,
                         subjectName = subject.subjectName,
                         columnName = column.name,
                         grade = grade,
+                        gradeIndex = index,
                     )
                 }
             }

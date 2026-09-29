@@ -16,6 +16,7 @@ import pl.usagi.edziennik.dto.ReceivedMessageDto
 import pl.usagi.edziennik.dto.UnreadMessageCountDto
 import pl.usagi.edziennik.domain.MessageMailboxType
 import java.io.IOException
+import java.io.File
 import javax.inject.Inject
 
 interface MessagesApiClient {
@@ -46,6 +47,12 @@ interface MessagesApiClient {
         context: MessagesSessionContext,
         apiGlobalKey: String,
     ): MessageDetailsDto
+
+    suspend fun downloadAttachment(
+        context: MessagesSessionContext,
+        url: String,
+        destination: File,
+    ): String?
 
     suspend fun markMessageAsRead(
         context: MessagesSessionContext,
@@ -120,6 +127,51 @@ class OkHttpMessagesApiClient @Inject constructor(
             .build()
 
         executeJsonRequest(request, MessageDetailsDto.serializer())
+    }
+
+    override suspend fun downloadAttachment(
+        context: MessagesSessionContext,
+        url: String,
+        destination: File,
+    ): String? = withContext(Dispatchers.IO) {
+        var currentUrl = context.appUrl.resolve(url)
+            ?: throw MessagesSessionException.UnexpectedResponse()
+        if (currentUrl.scheme != "https") throw MessagesSessionException.UnexpectedResponse()
+
+        val downloadClient = okHttpClient.newBuilder().followRedirects(false).build()
+        try {
+            repeat(MAX_ATTACHMENT_REDIRECTS + 1) { redirectCount ->
+                val request = if (currentUrl.host == context.appUrl.host && currentUrl.port == context.appUrl.port) {
+                    baseRequest(context)
+                } else {
+                    Request.Builder()
+                }.url(currentUrl).header("Accept", "*/*").get().build()
+
+                downloadClient.newCall(request).execute().use { response ->
+                    if (response.code in 300..399) {
+                        if (redirectCount == MAX_ATTACHMENT_REDIRECTS) {
+                            throw MessagesSessionException.UnexpectedResponse()
+                        }
+                        val nextUrl = response.header("Location")?.let(currentUrl::resolve)
+                            ?: throw MessagesSessionException.UnexpectedResponse()
+                        if (nextUrl.scheme != "https") throw MessagesSessionException.UnexpectedResponse()
+                        currentUrl = nextUrl
+                    } else {
+                        if (!response.isSuccessful) throw MessagesSessionException.Http(response.code)
+                        val body = response.body
+                        destination.outputStream().use { output -> body.byteStream().copyTo(output) }
+                        return@withContext response.header("Content-Type")
+                    }
+                }
+            }
+            throw MessagesSessionException.UnexpectedResponse()
+        } catch (exception: IOException) {
+            destination.delete()
+            throw MessagesSessionException.Network(exception)
+        } catch (exception: Exception) {
+            destination.delete()
+            throw exception
+        }
     }
 
     override suspend fun markMessageAsRead(
@@ -213,6 +265,7 @@ class OkHttpMessagesApiClient @Inject constructor(
 
     private companion object {
         const val ACCEPT_JSON = "application/json, text/plain, */*"
+        const val MAX_ATTACHMENT_REDIRECTS = 5
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 }

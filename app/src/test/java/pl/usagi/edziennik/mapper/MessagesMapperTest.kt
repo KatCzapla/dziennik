@@ -12,6 +12,37 @@ import java.time.LocalDateTime
 
 class MessagesMapperTest {
     @Test
+    fun messageWithoutAttachmentsKeepsEmptyList() {
+        assertTrue(detailsDto(emptyList()).toDomain().attachments.isEmpty())
+    }
+
+    @Test
+    fun messageWithMultipleAttachmentsKeepsAllNamesAndUrlsInOrder() {
+        val attachments = listOf(
+            MessageAttachmentDto("/files/a.pdf", "a.pdf"),
+            MessageAttachmentDto("/files/b.txt", "b.txt"),
+        )
+
+        val mapped = detailsDto(attachments).toDomain().attachments
+
+        assertEquals(listOf("a.pdf", "b.txt"), mapped.map { it.fileName })
+        assertEquals(listOf("/files/a.pdf", "/files/b.txt"), mapped.map { it.url })
+    }
+
+    private fun detailsDto(attachments: List<MessageAttachmentDto>) = MessageDetailsDto(
+        date = "2026-09-14T18:32:00+02:00",
+        apiGlobalKey = "api-key-123",
+        sender = "Anna Kowalska",
+        senderType = 1,
+        subject = "Zebranie",
+        content = "Treść",
+        read = true,
+        attachments = attachments,
+        withdrawn = false,
+        id = 123,
+    )
+
+    @Test
     fun mapsStableMessageIdSenderSubjectDateAndUnreadState() {
         val message = messageDto(
             id = 123,
