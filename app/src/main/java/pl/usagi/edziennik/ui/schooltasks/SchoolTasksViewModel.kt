@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.Student
@@ -41,6 +43,8 @@ class SchoolTasksViewModel @Inject constructor(
     )
     val uiState: StateFlow<SchoolTasksUiState> = _uiState.asStateFlow()
     private var loadedWeek: WeekRange? = null
+    private var loadingJob: Job? = null
+    private var loadId = 0L
 
     fun navigationTargetShown() {
         savedStateHandle["taskTargetConsumed"] = true
@@ -82,6 +86,7 @@ class SchoolTasksViewModel @Inject constructor(
         val previousWeek = _uiState.value.displayedWeek
         _uiState.update { state -> state.copy(selectedDate = date) }
         if (WeekRange.fromDate(date) != previousWeek) {
+            loadedWeek = null
             loadSchoolTasks()
         }
     }
@@ -97,10 +102,14 @@ class SchoolTasksViewModel @Inject constructor(
     private fun observeActiveStudent() {
         viewModelScope.launch {
             activeStudentManager.activeStudent.collect { student ->
+                loadingJob?.cancel()
+                loadId++
+                loadedWeek = null
                 _uiState.update { state ->
                     state.copy(
                         activeStudent = student,
                         weekTasks = if (student == null) emptyList() else state.weekTasks,
+                        isLoading = false,
                         errorMessage = if (student == null) {
                             "Wybierz ucznia, aby zobaczyć sprawdziany i zadania."
                         } else {
@@ -109,7 +118,6 @@ class SchoolTasksViewModel @Inject constructor(
                     )
                 }
                 if (student != null) {
-                    loadedWeek = null
                     loadSchoolTasks()
                 }
             }
@@ -117,7 +125,10 @@ class SchoolTasksViewModel @Inject constructor(
     }
 
     private fun loadSchoolTasks(force: Boolean = false) {
-        if (_uiState.value.activeStudent == null) {
+        val student = _uiState.value.activeStudent
+        if (student == null) {
+            loadingJob?.cancel()
+            loadId++
             _uiState.update { state ->
                 state.copy(
                     weekTasks = emptyList(),
@@ -128,11 +139,11 @@ class SchoolTasksViewModel @Inject constructor(
             return
         }
 
-        viewModelScope.launch {
-            val week = _uiState.value.displayedWeek
-            if (!force && loadedWeek == week) {
-                return@launch
-            }
+        val week = _uiState.value.displayedWeek
+        if (!force && loadedWeek == week && loadingJob?.isActive != true) return
+        loadingJob?.cancel()
+        val requestId = ++loadId
+        loadingJob = viewModelScope.launch {
             _uiState.update { state ->
                 state.copy(
                     isLoading = true,
@@ -140,12 +151,13 @@ class SchoolTasksViewModel @Inject constructor(
                 )
             }
 
-            runCatching {
-                schoolTasksRepository.getSchoolTasks(
+            try {
+                val tasks = schoolTasksRepository.getSchoolTasks(
                     from = week.clampedSchoolWeekStart(schoolYearRange),
                     to = week.clampedSchoolWeekEnd(schoolYearRange),
                 )
-            }.onSuccess { tasks ->
+                if (loadId != requestId || activeStudentManager.activeStudent.value != student ||
+                    _uiState.value.displayedWeek != week) return@launch
                 _uiState.update { state ->
                     state.copy(
                         weekTasks = tasks.filter { it.date in week.clampedSchoolWeekStart(schoolYearRange)..week.clampedSchoolWeekEnd(schoolYearRange) },
@@ -154,7 +166,11 @@ class SchoolTasksViewModel @Inject constructor(
                     )
                 }
                 loadedWeek = week
-            }.onFailure { error ->
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (loadId != requestId || activeStudentManager.activeStudent.value != student ||
+                    _uiState.value.displayedWeek != week) return@launch
                 _uiState.update { state ->
                     state.copy(
                         weekTasks = emptyList(),

@@ -4,7 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.serialization.SerializationException
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -27,11 +29,81 @@ import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class GradesViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+
+    @Test
+    fun lateGradesResponseCannotReplaceNewerPeriod() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = DelayedGradesRepository(delayGrades = true)
+        val viewModel = GradesViewModel(repository, manager, fixedClock())
+        manager.initialize(listOf(firstStudent))
+        runCurrent()
+
+        viewModel.selectPeriod(defaultPeriods[1])
+        runCurrent()
+        assertEquals("New", viewModel.uiState.value.grades?.subjects?.single()?.subjectName)
+        assertEquals(124, viewModel.uiState.value.selectedPeriod?.id)
+        assertEquals(true, repository.firstJob?.isCancelled)
+
+        repository.finishFirstGrades(grades(listOf(subjectWithGrade().copy(subjectName = "Old"))))
+        advanceUntilIdle()
+        assertEquals("New", viewModel.uiState.value.grades?.subjects?.single()?.subjectName)
+        assertEquals(124, viewModel.uiState.value.selectedPeriod?.id)
+    }
+
+    @Test
+    fun latePeriodsResponseCannotReplaceNewerStudent() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = DelayedGradesRepository(delayGrades = false)
+        val viewModel = GradesViewModel(repository, manager, fixedClock())
+        manager.initialize(listOf(firstStudent, secondStudent))
+        manager.setActiveStudent(firstStudent)
+        runCurrent()
+
+        manager.setActiveStudent(secondStudent)
+        runCurrent()
+        assertEquals(secondStudent, viewModel.uiState.value.activeStudent)
+        assertEquals(223, viewModel.uiState.value.selectedPeriod?.id)
+        assertEquals(true, repository.firstJob?.isCancelled)
+
+        repository.finishFirstPeriods(defaultPeriods)
+        advanceUntilIdle()
+        assertEquals(secondStudent, viewModel.uiState.value.activeStudent)
+        assertEquals(223, viewModel.uiState.value.selectedPeriod?.id)
+        assertEquals("New", viewModel.uiState.value.grades?.subjects?.single()?.subjectName)
+    }
+
+    private class DelayedGradesRepository(private val delayGrades: Boolean) : GradesRepository {
+        private var periodRequests = 0
+        private var gradeRequests = 0
+        private lateinit var firstPeriods: Continuation<List<ClassificationPeriod>>
+        private lateinit var firstGrades: Continuation<Grades>
+        var firstJob: Job? = null
+
+        override suspend fun getClassificationPeriods(student: Student): List<ClassificationPeriod> =
+            if (!delayGrades && ++periodRequests == 1) suspendCoroutine { continuation ->
+                firstPeriods = continuation
+                firstJob = continuation.context[Job]
+            } else if (student == secondStudent) listOf(
+                defaultPeriods[0].copy(id = 223), defaultPeriods[1].copy(id = 224),
+            ) else defaultPeriods
+
+        override suspend fun getGrades(student: Student, period: ClassificationPeriod): Grades =
+            if (delayGrades && ++gradeRequests == 1) suspendCoroutine { continuation ->
+                firstGrades = continuation
+                firstJob = continuation.context[Job]
+            } else grades(listOf(subjectWithGrade().copy(subjectName = "New")))
+
+        fun finishFirstPeriods(periods: List<ClassificationPeriod>) = firstPeriods.resume(periods)
+        fun finishFirstGrades(result: Grades) = firstGrades.resume(result)
+    }
 
     @Test
     fun navigationTargetSelectsItsPeriodAndOpensExactGradeOnlyOnce() = runTest {

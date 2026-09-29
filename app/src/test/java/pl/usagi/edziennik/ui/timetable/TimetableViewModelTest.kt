@@ -2,7 +2,9 @@ package pl.usagi.edziennik.ui.timetable
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -16,11 +18,64 @@ import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TimetableViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+
+    @Test
+    fun lateWeekResponseCannotReplaceNewerWeek() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = DelayedTimetableRepository()
+        val viewModel = TimetableViewModel(repository, manager, fixedClock())
+        manager.initialize(listOf(firstStudent))
+        runCurrent()
+
+        viewModel.nextWeek()
+        runCurrent()
+        assertEquals("New", viewModel.uiState.value.entries.single().subject)
+        assertTrue(repository.firstJob!!.isCancelled)
+
+        repository.finishFirst(timetableEntry(LocalDate.of(2026, 9, 9)).copy(subject = "Old"))
+        advanceUntilIdle()
+        assertEquals("New", viewModel.uiState.value.entries.single().subject)
+    }
+
+    @Test
+    fun lateStudentResponseCannotReplaceNewerStudent() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = DelayedTimetableRepository()
+        val viewModel = TimetableViewModel(repository, manager, fixedClock())
+        manager.initialize(listOf(firstStudent, secondStudent))
+        manager.setActiveStudent(firstStudent)
+        runCurrent()
+
+        manager.setActiveStudent(secondStudent)
+        runCurrent()
+        repository.finishFirst(timetableEntry(LocalDate.of(2026, 9, 9)).copy(subject = "Old"))
+        advanceUntilIdle()
+
+        assertEquals(secondStudent, viewModel.uiState.value.activeStudent)
+        assertEquals("New", viewModel.uiState.value.entries.single().subject)
+    }
+
+    private class DelayedTimetableRepository : TimetableRepository {
+        private var count = 0
+        private lateinit var first: Continuation<List<TimetableEntry>>
+        var firstJob: Job? = null
+
+        override suspend fun getTimetable(from: LocalDate, to: LocalDate): List<TimetableEntry> =
+            if (++count == 1) suspendCoroutine { continuation ->
+                first = continuation
+                firstJob = continuation.context[Job]
+            } else listOf(timetableEntry(from).copy(subject = "New"))
+
+        fun finishFirst(entry: TimetableEntry) = first.resume(listOf(entry))
+    }
 
     @Test
     fun activeStudentChangeReloadsTimetable() = runTest {

@@ -43,8 +43,11 @@ class AttendanceViewModel @Inject constructor(
     )
     val uiState: StateFlow<AttendanceUiState> = _uiState.asStateFlow()
     private var loadedWeek: WeekRange? = null
+    private var attendanceJob: Job? = null
+    private var attendanceLoadId = 0L
     private var loadedStatisticsSubjectId: Int? = null
     private var statisticsJob: Job? = null
+    private var statisticsLoadId = 0L
 
     init {
         observeStudents()
@@ -82,6 +85,7 @@ class AttendanceViewModel @Inject constructor(
         val previousWeek = _uiState.value.displayedWeek
         _uiState.update { state -> state.copy(selectedDate = date) }
         if (WeekRange.fromDate(date) != previousWeek) {
+            loadedWeek = null
             loadAttendance()
         }
     }
@@ -126,12 +130,17 @@ class AttendanceViewModel @Inject constructor(
     private fun observeActiveStudent() {
         viewModelScope.launch {
             activeStudentManager.activeStudent.collect { student ->
+                attendanceJob?.cancel()
+                attendanceLoadId++
+                loadedWeek = null
                 statisticsJob?.cancel()
+                statisticsLoadId++
                 loadedStatisticsSubjectId = null
                 _uiState.update { state ->
                     state.copy(
                         activeStudent = student,
                         weekEntries = if (student == null) emptyList() else state.weekEntries,
+                        isLoading = false,
                         subjects = emptyList(),
                         selectedSubjectId = -1,
                         statistics = null,
@@ -145,7 +154,6 @@ class AttendanceViewModel @Inject constructor(
                     )
                 }
                 if (student != null) {
-                    loadedWeek = null
                     loadAttendance()
                     if (_uiState.value.view == AttendanceView.STATISTICS) loadStatistics()
                 }
@@ -154,11 +162,12 @@ class AttendanceViewModel @Inject constructor(
     }
 
     private fun loadStatistics(force: Boolean = false) {
-        if (_uiState.value.activeStudent == null) return
+        val student = _uiState.value.activeStudent ?: return
         val subjectId = _uiState.value.selectedSubjectId
-        if (!force && loadedStatisticsSubjectId == subjectId) return
+        if (!force && loadedStatisticsSubjectId == subjectId && statisticsJob?.isActive != true) return
 
         statisticsJob?.cancel()
+        val requestId = ++statisticsLoadId
         statisticsJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(isStatisticsLoading = true, statisticsErrorMessage = null)
@@ -166,6 +175,8 @@ class AttendanceViewModel @Inject constructor(
             try {
                 if (_uiState.value.subjects.isEmpty()) {
                     val subjects = attendanceRepository.getSubjects()
+                    if (statisticsLoadId != requestId || activeStudentManager.activeStudent.value != student ||
+                        _uiState.value.selectedSubjectId != subjectId) return@launch
                     val options = if (subjects.any { it.id == -1 }) {
                         subjects
                     } else {
@@ -174,6 +185,8 @@ class AttendanceViewModel @Inject constructor(
                     _uiState.update { it.copy(subjects = options) }
                 }
                 val statistics = attendanceRepository.getStatistics(subjectId)
+                if (statisticsLoadId != requestId || activeStudentManager.activeStudent.value != student ||
+                    _uiState.value.selectedSubjectId != subjectId) return@launch
                 _uiState.update {
                     it.copy(
                         statistics = statistics,
@@ -185,6 +198,8 @@ class AttendanceViewModel @Inject constructor(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
+                if (statisticsLoadId != requestId || activeStudentManager.activeStudent.value != student ||
+                    _uiState.value.selectedSubjectId != subjectId) return@launch
                 _uiState.update {
                     it.copy(
                         statistics = null,
@@ -198,7 +213,10 @@ class AttendanceViewModel @Inject constructor(
     }
 
     private fun loadAttendance(force: Boolean = false) {
-        if (_uiState.value.activeStudent == null) {
+        val student = _uiState.value.activeStudent
+        if (student == null) {
+            attendanceJob?.cancel()
+            attendanceLoadId++
             _uiState.update { state ->
                 state.copy(
                     weekEntries = emptyList(),
@@ -209,11 +227,11 @@ class AttendanceViewModel @Inject constructor(
             return
         }
 
-        viewModelScope.launch {
-            val week = _uiState.value.displayedWeek
-            if (!force && loadedWeek == week) {
-                return@launch
-            }
+        val week = _uiState.value.displayedWeek
+        if (!force && loadedWeek == week && attendanceJob?.isActive != true) return
+        attendanceJob?.cancel()
+        val requestId = ++attendanceLoadId
+        attendanceJob = viewModelScope.launch {
             _uiState.update { state ->
                 state.copy(
                     isLoading = true,
@@ -221,12 +239,13 @@ class AttendanceViewModel @Inject constructor(
                 )
             }
 
-            runCatching {
-                attendanceRepository.getAttendance(
+            try {
+                val entries = attendanceRepository.getAttendance(
                     from = week.clampedSchoolWeekStart(schoolYearRange),
                     to = week.clampedSchoolWeekEnd(schoolYearRange),
                 )
-            }.onSuccess { entries ->
+                if (attendanceLoadId != requestId || activeStudentManager.activeStudent.value != student ||
+                    _uiState.value.displayedWeek != week) return@launch
                 _uiState.update { state ->
                     state.copy(
                         weekEntries = entries,
@@ -235,7 +254,11 @@ class AttendanceViewModel @Inject constructor(
                     )
                 }
                 loadedWeek = week
-            }.onFailure { error ->
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (attendanceLoadId != requestId || activeStudentManager.activeStudent.value != student ||
+                    _uiState.value.displayedWeek != week) return@launch
                 _uiState.update { state ->
                     state.copy(
                         weekEntries = emptyList(),

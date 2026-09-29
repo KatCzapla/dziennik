@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.ClassificationPeriod
@@ -29,6 +31,10 @@ class GradesViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(GradesUiState())
     val uiState: StateFlow<GradesUiState> = _uiState.asStateFlow()
     private val navigationTarget = GradeNavigationTarget.from(savedStateHandle)
+    private var periodsJob: Job? = null
+    private var gradesJob: Job? = null
+    private var periodsLoadId = 0L
+    private var gradesLoadId = 0L
 
     fun consumeNavigationTarget(): GradeNavigationTarget? {
         if (savedStateHandle.get<Boolean>("gradeTargetConsumed") == true || _uiState.value.isLoading) return null
@@ -49,9 +55,12 @@ class GradesViewModel @Inject constructor(
 
     fun selectPeriod(period: ClassificationPeriod) {
         val student = _uiState.value.activeStudent ?: return
+        periodsJob?.cancel()
+        periodsLoadId++
         _uiState.update { state ->
             state.copy(
                 selectedPeriod = period,
+                isLoadingPeriods = false,
                 errorMessage = null,
             )
         }
@@ -87,12 +96,18 @@ class GradesViewModel @Inject constructor(
     private fun observeActiveStudent() {
         viewModelScope.launch {
             activeStudentManager.activeStudent.collect { student ->
+                periodsJob?.cancel()
+                gradesJob?.cancel()
+                periodsLoadId++
+                gradesLoadId++
                 _uiState.update { state ->
                     state.copy(
                         activeStudent = student,
                         periods = emptyList(),
                         selectedPeriod = null,
                         grades = null,
+                        isLoadingPeriods = false,
+                        isLoadingGrades = false,
                         errorMessage = if (student == null) {
                             "Wybierz ucznia, aby zobaczyć oceny."
                         } else {
@@ -108,7 +123,9 @@ class GradesViewModel @Inject constructor(
     }
 
     private fun loadPeriods(student: Student) {
-        viewModelScope.launch {
+        periodsJob?.cancel()
+        val requestId = ++periodsLoadId
+        periodsJob = viewModelScope.launch {
             _uiState.update { state ->
                 state.copy(
                     isLoadingPeriods = true,
@@ -117,10 +134,10 @@ class GradesViewModel @Inject constructor(
                 )
             }
 
-            runCatching {
-                gradesRepository.getClassificationPeriods(student)
+            try {
+                val periods = gradesRepository.getClassificationPeriods(student)
                     .sortedBy { it.startDate }
-            }.onSuccess { periods ->
+                if (periodsLoadId != requestId || activeStudentManager.activeStudent.value != student) return@launch
                 val selectedPeriod = periods.firstOrNull { it.id == navigationTarget?.periodId }
                     ?: chooseClassificationPeriod(
                         periods = periods,
@@ -141,7 +158,10 @@ class GradesViewModel @Inject constructor(
                 if (selectedPeriod != null) {
                     loadGrades(student, selectedPeriod)
                 }
-            }.onFailure { error ->
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (periodsLoadId != requestId || activeStudentManager.activeStudent.value != student) return@launch
                 _uiState.update { state ->
                     state.copy(
                         periods = emptyList(),
@@ -159,7 +179,9 @@ class GradesViewModel @Inject constructor(
         student: Student,
         period: ClassificationPeriod,
     ) {
-        viewModelScope.launch {
+        gradesJob?.cancel()
+        val requestId = ++gradesLoadId
+        gradesJob = viewModelScope.launch {
             _uiState.update { state ->
                 state.copy(
                     isLoadingGrades = true,
@@ -167,9 +189,10 @@ class GradesViewModel @Inject constructor(
                 )
             }
 
-            runCatching {
-                gradesRepository.getGrades(student, period)
-            }.onSuccess { grades ->
+            try {
+                val grades = gradesRepository.getGrades(student, period)
+                if (gradesLoadId != requestId || activeStudentManager.activeStudent.value != student ||
+                    _uiState.value.selectedPeriod?.id != period.id) return@launch
                 _uiState.update { state ->
                     state.copy(
                         grades = grades,
@@ -177,7 +200,11 @@ class GradesViewModel @Inject constructor(
                         errorMessage = null,
                     )
                 }
-            }.onFailure { error ->
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (gradesLoadId != requestId || activeStudentManager.activeStudent.value != student ||
+                    _uiState.value.selectedPeriod?.id != period.id) return@launch
                 _uiState.update { state ->
                     state.copy(
                         isLoadingGrades = false,

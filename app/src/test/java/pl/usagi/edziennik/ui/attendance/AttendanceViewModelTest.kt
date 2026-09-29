@@ -2,7 +2,9 @@ package pl.usagi.edziennik.ui.attendance
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -22,11 +24,100 @@ import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AttendanceViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+
+    @Test
+    fun lateWeekResponseCannotReplaceNewerWeek() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = DelayedAttendanceRepository()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 16)))
+        manager.initialize(listOf(firstStudent))
+        runCurrent()
+
+        viewModel.previousWeek()
+        runCurrent()
+        assertEquals("New", viewModel.uiState.value.weekEntries.single().subject)
+        assertTrue(repository.firstJob!!.isCancelled)
+
+        repository.finishFirst(attendanceEntry().copy(subject = "Old"))
+        advanceUntilIdle()
+        assertEquals("New", viewModel.uiState.value.weekEntries.single().subject)
+    }
+
+    @Test
+    fun lateStudentResponseCannotReplaceNewerStudent() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = DelayedAttendanceRepository()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 9)))
+        manager.initialize(listOf(firstStudent, secondStudent))
+        manager.setActiveStudent(firstStudent)
+        runCurrent()
+
+        manager.setActiveStudent(secondStudent)
+        runCurrent()
+        repository.finishFirst(attendanceEntry().copy(subject = "Old"))
+        advanceUntilIdle()
+
+        assertEquals(secondStudent, viewModel.uiState.value.activeStudent)
+        assertEquals("New", viewModel.uiState.value.weekEntries.single().subject)
+    }
+
+    @Test
+    fun lateStatisticsCannotReplaceNewerSubject() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = DelayedAttendanceRepository(delayStatistics = true)
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 9)))
+        manager.initialize(listOf(firstStudent))
+        runCurrent()
+        viewModel.selectView(AttendanceView.STATISTICS)
+        runCurrent()
+
+        viewModel.selectSubject(7867)
+        runCurrent()
+        assertEquals(2.0, viewModel.uiState.value.statistics?.summary)
+        assertTrue(repository.firstStatisticsJob!!.isCancelled)
+
+        repository.finishFirstStatistics()
+        advanceUntilIdle()
+        assertEquals(7867, viewModel.uiState.value.selectedSubjectId)
+        assertEquals(2.0, viewModel.uiState.value.statistics?.summary)
+    }
+
+    private class DelayedAttendanceRepository(
+        private val delayStatistics: Boolean = false,
+    ) : AttendanceRepository {
+        private var entryCount = 0
+        private lateinit var first: Continuation<List<AttendanceEntry>>
+        var firstJob: Job? = null
+        private lateinit var firstStatistics: Continuation<AttendanceStatistics>
+        var firstStatisticsJob: Job? = null
+
+        override suspend fun getAttendance(from: LocalDate, to: LocalDate): List<AttendanceEntry> =
+            if (!delayStatistics && ++entryCount == 1) suspendCoroutine { continuation ->
+                first = continuation
+                firstJob = continuation.context[Job]
+            } else listOf(attendanceEntry().copy(subject = "New"))
+
+        override suspend fun getSubjects(): List<AttendanceSubject> = listOf(
+            AttendanceSubject(-1, "Wszystkie"), AttendanceSubject(7867, "Polski"),
+        )
+
+        override suspend fun getStatistics(subjectId: Int): AttendanceStatistics =
+            if (subjectId == -1) suspendCoroutine { continuation ->
+                firstStatistics = continuation
+                firstStatisticsJob = continuation.context[Job]
+            } else AttendanceStatistics(2.0, emptyList())
+
+        fun finishFirst(entry: AttendanceEntry) = first.resume(listOf(entry))
+        fun finishFirstStatistics() = firstStatistics.resume(AttendanceStatistics(1.0, emptyList()))
+    }
 
     @Test
     fun initialLoadOnSchoolDaySelectsTodayAndFetchesWeek() = runTest {

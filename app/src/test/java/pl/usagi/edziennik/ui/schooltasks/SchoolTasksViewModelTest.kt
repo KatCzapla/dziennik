@@ -3,7 +3,9 @@ package pl.usagi.edziennik.ui.schooltasks
 import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -19,11 +21,64 @@ import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 import java.time.Clock
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SchoolTasksViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+
+    @Test
+    fun lateWeekResponseCannotReplaceNewerWeek() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = DelayedSchoolTasksRepository()
+        val viewModel = SchoolTasksViewModel(repository, manager, fixedClock())
+        manager.initialize(listOf(firstStudent))
+        runCurrent()
+
+        viewModel.nextWeek()
+        runCurrent()
+        assertEquals("New", viewModel.uiState.value.weekTasks.single().details?.description)
+        assertTrue(repository.firstJob!!.isCancelled)
+
+        repository.finishFirst(schoolTask(LocalDate.of(2026, 9, 9), "Old"))
+        advanceUntilIdle()
+        assertEquals("New", viewModel.uiState.value.weekTasks.single().details?.description)
+    }
+
+    @Test
+    fun lateStudentResponseCannotReplaceNewerStudent() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = DelayedSchoolTasksRepository()
+        val viewModel = SchoolTasksViewModel(repository, manager, fixedClock())
+        manager.initialize(listOf(firstStudent, secondStudent))
+        manager.setActiveStudent(firstStudent)
+        runCurrent()
+
+        manager.setActiveStudent(secondStudent)
+        runCurrent()
+        repository.finishFirst(schoolTask(LocalDate.of(2026, 9, 9), "Old"))
+        advanceUntilIdle()
+
+        assertEquals(secondStudent, viewModel.uiState.value.activeStudent)
+        assertEquals("New", viewModel.uiState.value.weekTasks.single().details?.description)
+    }
+
+    private class DelayedSchoolTasksRepository : SchoolTasksRepository {
+        private var count = 0
+        private lateinit var first: Continuation<List<SchoolTask>>
+        var firstJob: Job? = null
+
+        override suspend fun getSchoolTasks(from: LocalDate, to: LocalDate): List<SchoolTask> =
+            if (++count == 1) suspendCoroutine { continuation ->
+                first = continuation
+                firstJob = continuation.context[Job]
+            } else listOf(schoolTask(from, "New"))
+
+        fun finishFirst(task: SchoolTask) = first.resume(listOf(task))
+    }
 
     @Test
     fun homeworkAndTestNavigationLoadTargetWeekAndKeepExistingDetails() = runTest {
