@@ -11,7 +11,16 @@ interface AttendanceRepository {
         to: LocalDate,
     ): List<AttendanceEntry>
 
+    suspend fun getAttendanceWithCompleteness(from: LocalDate, to: LocalDate): AttendanceFetchResult =
+        AttendanceFetchResult(getAttendance(from, to), excusesComplete = true)
+
     suspend fun getSubjects(): List<AttendanceSubject>
 
     suspend fun getStatistics(subjectId: Int): AttendanceStatistics
 }
+
+data class AttendanceFetchResult(
+    val entries: List<AttendanceEntry>,
+    val excusesComplete: Boolean,
+    val entriesComplete: Boolean = true,
+)

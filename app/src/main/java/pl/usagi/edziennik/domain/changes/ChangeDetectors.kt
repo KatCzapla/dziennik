@@ -10,8 +10,12 @@ import pl.usagi.edziennik.domain.SchoolTask
 import pl.usagi.edziennik.domain.TimetableEntry
 
 fun detectMessages(old: List<MessageSnapshot>, current: List<ReceivedMessage>): List<ChangeEvent> {
+    return detectMessageSnapshots(old, current.messageSnapshots())
+}
+
+fun detectMessageSnapshots(old: List<MessageSnapshot>, current: List<MessageSnapshot>): List<ChangeEvent> {
     val oldIds = old.mapTo(mutableSetOf()) { it.id }
-    return current.messageSnapshots().distinctBy { it.id }
+    return current.distinctBy { it.id }
         .filter { it.id !in oldIds }
         .map { ChangeEvent.NewMessage(it.id, it.subject, it.date) }
 }
@@ -126,8 +130,12 @@ fun detectInformation(old: List<InformationSnapshot>, current: List<DashboardInf
 }
 
 fun detectPayments(old: PaymentsSnapshot, current: Payments): List<ChangeEvent> {
+    return detectPaymentSnapshots(old, current.toSnapshot())
+}
+
+fun detectPaymentSnapshots(old: PaymentsSnapshot, current: PaymentsSnapshot): List<ChangeEvent> {
     val previous = old.accounts.singleOrNull() ?: return emptyList()
-    val updated = current.toSnapshot().accounts.singleOrNull() ?: return emptyList()
+    val updated = current.accounts.singleOrNull() ?: return emptyList()
     val amountChanged = when {
         previous.amountDue == null || updated.amountDue == null -> previous.amountDue != updated.amountDue
         else -> previous.amountDue.compareTo(updated.amountDue) != 0

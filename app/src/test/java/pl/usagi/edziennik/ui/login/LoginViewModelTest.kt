@@ -611,6 +611,7 @@ class LoginViewModelTest {
 
     private class FakeSnapshotStore : SnapshotStore {
         val deletedAccounts = mutableListOf<LocalAccountId>()
+        override suspend fun read(scope: SnapshotScope): String? = null
         override suspend fun update(scope: SnapshotScope, transform: (String?) -> SnapshotWrite): List<ChangeEvent> =
             transform(null).events
         override suspend fun deleteAccount(accountId: LocalAccountId) { deletedAccounts += accountId }

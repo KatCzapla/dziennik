@@ -9,11 +9,14 @@ import javax.inject.Inject
 data class SnapshotWrite(val payload: String?, val events: List<ChangeEvent> = emptyList())
 
 interface SnapshotStore {
+    suspend fun read(scope: SnapshotScope): String?
     suspend fun update(scope: SnapshotScope, transform: (String?) -> SnapshotWrite): List<ChangeEvent>
     suspend fun deleteAccount(accountId: LocalAccountId)
 }
 
 class RoomSnapshotStore @Inject constructor(private val database: SnapshotDatabase) : SnapshotStore {
+    override suspend fun read(scope: SnapshotScope): String? = database.snapshotDao().find(scope.storageKey)
+
     override suspend fun update(scope: SnapshotScope, transform: (String?) -> SnapshotWrite): List<ChangeEvent> =
         database.withTransaction {
             val write = transform(database.snapshotDao().find(scope.storageKey))

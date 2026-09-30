@@ -186,7 +186,7 @@ class SnapshotSyncManagerTest {
     }
 
     private fun messages(vararg ids: Int) = CurrentSnapshotData.Messages(ids.map { id ->
-        ReceivedMessage(id, "must-not-be-stored", "Nadawca", "Temat $id", day.atStartOfDay(), true, false)
+        MessageSnapshot(id, "Temat $id", day.atStartOfDay())
     })
 
     private fun attendance(status: AttendanceStatus) = CurrentSnapshotData.Attendance(listOf(
@@ -209,6 +209,7 @@ class SnapshotSyncManagerTest {
 
     private class MemorySnapshotStore : SnapshotStore {
         val payloads = mutableMapOf<String, String>()
+        override suspend fun read(scope: SnapshotScope): String? = payloads[scope.storageKey]
         override suspend fun update(scope: SnapshotScope, transform: (String?) -> SnapshotWrite): List<ChangeEvent> {
             val write = transform(payloads[scope.storageKey])
             write.payload?.let { payloads[scope.storageKey] = it }

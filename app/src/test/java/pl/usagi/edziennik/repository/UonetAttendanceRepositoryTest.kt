@@ -47,9 +47,39 @@ class UonetAttendanceRepositoryTest {
         assertNull(entries.single().excuseStatus)
     }
 
+    @Test
+    fun failedExcusesAreReportedAsPartialToSynchronization() = runTest {
+        val result = repository(excusesHttpStatus = 503).getAttendanceWithCompleteness(weekStart, weekEnd)
+
+        assertEquals(false, result.excusesComplete)
+        assertEquals(1, result.entries.size)
+        assertNull(result.entries.single().excuseStatus)
+    }
+
+    @Test
+    fun unmappableEntryDoesNotClaimCompleteAttendance() = runTest {
+        val response = """{"oddzialy":[{"idPoraLekcji":1568,"data":"2026-09-15T00:00:00+02:00"}]}"""
+        val result = repository(attendanceResponse = response).getAttendanceWithCompleteness(weekStart, weekEnd)
+
+        assertEquals(false, result.entriesComplete)
+        assertEquals(emptyList<Any>(), result.entries)
+    }
+
+    @Test
+    fun unmappableExcuseDoesNotClaimCompleteExcuses() = runTest {
+        val response = """{"usprawiedliwienia":[{"status":0,"dzien":"2026-09-15T00:00:00+02:00"}]}"""
+        val result = repository(excusesResponse = response).getAttendanceWithCompleteness(weekStart, weekEnd)
+
+        assertEquals(false, result.excusesComplete)
+        assertEquals(1, result.entries.size)
+        assertNull(result.entries.single().excuseStatus)
+    }
+
     private fun repository(
         requests: MutableList<Request> = mutableListOf(),
         excusesHttpStatus: Int = 200,
+        attendanceResponse: String = attendanceBody,
+        excusesResponse: String = excusesBody,
     ): UonetAttendanceRepository {
         val studentManager = ActiveStudentManager()
         studentManager.initialize(listOf(
@@ -60,7 +90,7 @@ class UonetAttendanceRepositoryTest {
                 val request = chain.request()
                 requests += request
                 val isExcuses = request.url.encodedPath.endsWith("/Usprawiedliwienia")
-                val body = if (isExcuses) excusesBody else attendanceBody
+                val body = if (isExcuses) excusesResponse else attendanceResponse
                 Response.Builder()
                     .request(request)
                     .protocol(Protocol.HTTP_1_1)

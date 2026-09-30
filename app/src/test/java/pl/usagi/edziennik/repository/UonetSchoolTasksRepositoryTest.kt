@@ -6,6 +6,7 @@ import org.junit.Test
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.SchoolTaskType
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.domain.changes.TaskKey
 import pl.usagi.edziennik.dto.HomeworkDetailsDto
 import pl.usagi.edziennik.dto.SchoolTaskDto
 import pl.usagi.edziennik.dto.TestDetailsDto
@@ -82,6 +83,24 @@ class UonetSchoolTasksRepositoryTest {
         assertEquals(1, tasks.size)
         assertEquals(SchoolTaskType.Homework, tasks.single().type)
         assertEquals(null, tasks.single().details)
+    }
+
+    @Test
+    fun failedDetailIsReportedWithoutDroppingTheTask() = runTest {
+        val students = ActiveStudentManager().apply { initialize(listOf(student)) }
+        val repository = UonetSchoolTasksRepository(students, FakeRemoteDataSource(
+            tasks = listOf(schoolTaskDto(type = 4, id = 1), schoolTaskDto(type = 4, id = 2)),
+            failingHomeworkIds = setOf(1),
+        ))
+
+        val result = repository.getSchoolTasksWithCompleteness(
+            LocalDate.of(2026, 9, 14), LocalDate.of(2026, 9, 18),
+        )
+
+        assertEquals(listOf(1, 2), result.tasks.map { it.id })
+        assertEquals(setOf(TaskKey(4, 1)), result.failedDetailKeys)
+        assertEquals(null, result.tasks.first().details)
+        assertEquals("Homework 2", result.tasks.last().details?.description)
     }
 
     @Test

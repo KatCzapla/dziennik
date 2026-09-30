@@ -5,10 +5,11 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import pl.usagi.edziennik.domain.AttendanceEntry
 import pl.usagi.edziennik.domain.DashboardInformation
-import pl.usagi.edziennik.domain.ReceivedMessage
 import pl.usagi.edziennik.domain.SchoolTask
 import pl.usagi.edziennik.domain.TimetableEntry
 import pl.usagi.edziennik.domain.changes.ChangeEvent
+import pl.usagi.edziennik.domain.changes.MessageSnapshot
+import pl.usagi.edziennik.domain.changes.PaymentsSnapshot
 import pl.usagi.edziennik.domain.changes.SnapshotArea
 import pl.usagi.edziennik.domain.changes.SnapshotPayload
 import pl.usagi.edziennik.domain.changes.SnapshotScope
@@ -17,16 +18,14 @@ import pl.usagi.edziennik.domain.changes.attendanceSnapshots
 import pl.usagi.edziennik.domain.changes.detectAttendance
 import pl.usagi.edziennik.domain.changes.detectGrades
 import pl.usagi.edziennik.domain.changes.detectInformation
-import pl.usagi.edziennik.domain.changes.detectMessages
-import pl.usagi.edziennik.domain.changes.detectPayments
+import pl.usagi.edziennik.domain.changes.detectMessageSnapshots
+import pl.usagi.edziennik.domain.changes.detectPaymentSnapshots
 import pl.usagi.edziennik.domain.changes.detectTasks
 import pl.usagi.edziennik.domain.changes.detectTimetable
 import pl.usagi.edziennik.domain.changes.gradeSnapshots
 import pl.usagi.edziennik.domain.changes.informationSnapshots
-import pl.usagi.edziennik.domain.changes.messageSnapshots
 import pl.usagi.edziennik.domain.changes.taskSnapshots
 import pl.usagi.edziennik.domain.changes.timetableSnapshots
-import pl.usagi.edziennik.domain.changes.toSnapshot
 import javax.inject.Inject
 
 sealed interface SyncCompleteness {
@@ -40,13 +39,13 @@ sealed interface SyncCompleteness {
 }
 
 sealed interface CurrentSnapshotData {
-    data class Messages(val items: List<ReceivedMessage>) : CurrentSnapshotData
+    data class Messages(val items: List<MessageSnapshot>) : CurrentSnapshotData
     data class Grades(val periodId: Int, val grades: pl.usagi.edziennik.domain.Grades) : CurrentSnapshotData
     data class Timetable(val items: List<TimetableEntry>) : CurrentSnapshotData
     data class Attendance(val items: List<AttendanceEntry>) : CurrentSnapshotData
     data class Tasks(val items: List<SchoolTask>) : CurrentSnapshotData
     data class Information(val items: List<DashboardInformation>) : CurrentSnapshotData
-    data class Payments(val payments: pl.usagi.edziennik.domain.Payments) : CurrentSnapshotData
+    data class Payments(val payments: PaymentsSnapshot) : CurrentSnapshotData
 }
 
 class SnapshotSyncManager @Inject constructor(
@@ -54,6 +53,14 @@ class SnapshotSyncManager @Inject constructor(
     private val json: Json,
     private val identity: LocalSnapshotIdentity,
 ) {
+    suspend fun knownMessageIds(scope: SnapshotScope): Set<Int>? {
+        require(scope.area == SnapshotArea.MESSAGES)
+        if (scope.accountId != identity.currentAccountId()) return null
+        val saved = store.read(scope) ?: return null
+        return (json.decodeFromString<SnapshotPayload>(saved) as SnapshotPayload.Messages)
+            .items.mapTo(mutableSetOf()) { it.id }
+    }
+
     suspend fun sync(
         scope: SnapshotScope,
         completeness: SyncCompleteness,
@@ -79,7 +86,12 @@ class SnapshotSyncManager @Inject constructor(
                 val previous = json.decodeFromString<SnapshotPayload>(saved)
                 require(previous.area() == scope.area) { "Stored snapshot does not match its scope" }
                 val events = previous.detect(current)
-                val persisted = if (completeness is SyncCompleteness.Partial) previous.mergePartial(next, completeness) else next
+                val persisted = when {
+                    completeness is SyncCompleteness.Partial -> previous.mergePartial(next, completeness)
+                    previous is SnapshotPayload.Messages && next is SnapshotPayload.Messages ->
+                        SnapshotPayload.Messages((next.items + previous.items).distinctBy { it.id })
+                    else -> next
+                }
                 SnapshotWrite(json.encodeToString<SnapshotPayload>(persisted), events)
             }
         }
@@ -106,17 +118,17 @@ class SnapshotSyncManager @Inject constructor(
     }
 
     private fun CurrentSnapshotData.toPayload(): SnapshotPayload = when (this) {
-        is CurrentSnapshotData.Messages -> SnapshotPayload.Messages(items.messageSnapshots())
+        is CurrentSnapshotData.Messages -> SnapshotPayload.Messages(items)
         is CurrentSnapshotData.Grades -> SnapshotPayload.Grades(grades.gradeSnapshots(periodId))
         is CurrentSnapshotData.Timetable -> SnapshotPayload.Timetable(items.timetableSnapshots())
         is CurrentSnapshotData.Attendance -> SnapshotPayload.Attendance(items.attendanceSnapshots())
         is CurrentSnapshotData.Tasks -> SnapshotPayload.Tasks(items.taskSnapshots())
         is CurrentSnapshotData.Information -> SnapshotPayload.Information(items.informationSnapshots())
-        is CurrentSnapshotData.Payments -> SnapshotPayload.Payments(payments.toSnapshot())
+        is CurrentSnapshotData.Payments -> SnapshotPayload.Payments(payments)
     }
 
     private fun SnapshotPayload.detect(current: CurrentSnapshotData): List<ChangeEvent> = when {
-        this is SnapshotPayload.Messages && current is CurrentSnapshotData.Messages -> detectMessages(items, current.items)
+        this is SnapshotPayload.Messages && current is CurrentSnapshotData.Messages -> detectMessageSnapshots(items, current.items)
         this is SnapshotPayload.Grades && current is CurrentSnapshotData.Grades ->
             detectGrades(items, current.grades, current.periodId)
         this is SnapshotPayload.Timetable && current is CurrentSnapshotData.Timetable ->
@@ -127,7 +139,7 @@ class SnapshotSyncManager @Inject constructor(
         this is SnapshotPayload.Information && current is CurrentSnapshotData.Information ->
             detectInformation(items, current.items)
         this is SnapshotPayload.Payments && current is CurrentSnapshotData.Payments ->
-            detectPayments(value, current.payments)
+            detectPaymentSnapshots(value, current.payments)
         else -> error("Snapshot data does not match its stored payload")
     }
 

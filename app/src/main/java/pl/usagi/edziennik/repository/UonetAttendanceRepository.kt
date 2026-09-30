@@ -3,6 +3,7 @@ package pl.usagi.edziennik.repository
 import kotlinx.coroutines.CancellationException
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.AttendanceEntry
+import pl.usagi.edziennik.domain.AttendanceExcuse
 import pl.usagi.edziennik.domain.AttendanceStatistics
 import pl.usagi.edziennik.domain.AttendanceSubject
 import pl.usagi.edziennik.mapper.toDomain
@@ -22,31 +23,39 @@ class UonetAttendanceRepository @Inject constructor(
     override suspend fun getAttendance(
         from: LocalDate,
         to: LocalDate,
-    ): List<AttendanceEntry> {
+    ): List<AttendanceEntry> = getAttendanceWithCompleteness(from, to).entries
+
+    override suspend fun getAttendanceWithCompleteness(
+        from: LocalDate,
+        to: LocalDate,
+    ): AttendanceFetchResult {
         val activeStudent = activeStudentManager.requireActiveStudent(AttendanceRepositoryException.NoActiveStudent)
         val zoneId = ZoneId.systemDefault()
         val dateFrom = from.toApiStartOfDay(zoneId)
         val dateTo = to.toApiEndOfDay(zoneId)
 
-        val entries = dataSource.getAttendance(
+        val classEntries = dataSource.getAttendance(
             studentKey = activeStudent.key,
             dateFrom = dateFrom,
             dateTo = dateTo,
-        ).classEntries.toDomainAttendance()
+        ).classEntries
+        val entries = classEntries.toDomainAttendance()
 
-        val excuses = try {
-            dataSource.getExcuses(
+        val (excuses, excusesComplete) = try {
+            val response = dataSource.getExcuses(
                 studentKey = activeStudent.key,
                 dateFrom = dateFrom,
                 dateTo = dateTo,
-            ).toDomainExcuses()
+            )
+            val mapped = response.toDomainExcuses()
+            mapped to (mapped.size == response.excuses.size)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            emptyList()
+            emptyList<AttendanceExcuse>() to false
         }
 
-        return entries.withExcuses(excuses)
+        return AttendanceFetchResult(entries.withExcuses(excuses), excusesComplete, entries.size == classEntries.size)
     }
 
     override suspend fun getSubjects(): List<AttendanceSubject> {
