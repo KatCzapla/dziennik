@@ -1,0 +1,132 @@
+package pl.usagi.edziennik.background
+
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import dagger.Module
+import dagger.Provides
+import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.hilt.components.SingletonComponent
+import pl.usagi.edziennik.MainActivity
+import pl.usagi.edziennik.R
+import pl.usagi.edziennik.domain.AttendanceStatus
+import pl.usagi.edziennik.domain.changes.ChangeEvent
+import java.text.NumberFormat
+import java.util.Locale
+import java.util.UUID
+import javax.inject.Inject
+
+data class NotificationSpec(val title: String, val text: String, val route: String)
+
+fun ChangeEvent.notificationSpec(): NotificationSpec = when (this) {
+    is ChangeEvent.NewMessage -> NotificationSpec("Nowa wiadomość", subject, "messages")
+    is ChangeEvent.NewGrade -> NotificationSpec("Nowa ocena", "$subjectName: $value", "grades")
+    is ChangeEvent.EditedGrade -> NotificationSpec("Zmieniona ocena", "$subjectName: $newValue", "grades")
+    is ChangeEvent.LessonCancelled -> NotificationSpec("Odwołana lekcja", subject, "timetable")
+    is ChangeEvent.LessonSubstituted -> NotificationSpec("Zastępstwo", subject, "timetable")
+    is ChangeEvent.LessonUpdated -> NotificationSpec("Zmiana planu", subject, "timetable")
+    is ChangeEvent.AttendanceChanged -> NotificationSpec(
+        "Zmiana frekwencji",
+        listOfNotNull(subject, status.notificationLabel()).joinToString(": "),
+        "attendance",
+    )
+    is ChangeEvent.TaskChanged -> NotificationSpec(
+        if (isNew) "Nowe zadanie lub sprawdzian" else "Zmienione zadanie lub sprawdzian",
+        subject ?: date.toString(),
+        "schoolTasks?taskId=${key.id}&taskType=${key.rawType}&taskDate=$date",
+    )
+    is ChangeEvent.NewInformation -> NotificationSpec("Nowa informacja", subject, "home")
+    is ChangeEvent.PaymentChanged -> NotificationSpec(
+        "Zmiana opłat",
+        listOfNotNull(operationName, amountDue?.let {
+            NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pl-PL")).format(it)
+        }).joinToString(" ").ifBlank { "Sprawdź opłaty" },
+        "payments",
+    )
+}
+
+private fun AttendanceStatus.notificationLabel(): String = when (this) {
+    AttendanceStatus.Present -> "Obecność"
+    AttendanceStatus.Absent -> "Nieobecność"
+    AttendanceStatus.ExcusedAbsence -> "Nieobecność usprawiedliwiona"
+    AttendanceStatus.Late -> "Spóźnienie"
+    AttendanceStatus.ExcusedLate -> "Spóźnienie usprawiedliwione"
+    AttendanceStatus.SchoolRelatedAbsence -> "Nieobecność z przyczyn szkolnych"
+    AttendanceStatus.Released -> "Zwolnienie"
+    is AttendanceStatus.Unknown -> "Nowy status frekwencji"
+}
+
+interface ChangeNotifier {
+    fun publish(events: List<ChangeEvent>)
+}
+
+class AndroidChangeNotifier @Inject constructor(
+    @param:ApplicationContext private val context: Context,
+) : ChangeNotifier {
+
+    override fun publish(events: List<ChangeEvent>) {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) return
+        if (Build.VERSION.SDK_INT >= 26) {
+            context.getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "Zmiany w dzienniku", NotificationManager.IMPORTANCE_DEFAULT),
+            )
+        }
+        events.filterNot {
+            it is ChangeEvent.AttendanceChanged && it.status == AttendanceStatus.Present
+        }.forEach { event ->
+            val id = UUID.randomUUID().hashCode()
+            val spec = event.notificationSpec()
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra(MainActivity.EXTRA_NOTIFICATION_ROUTE, spec.route)
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                id,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_notification)
+                .setContentTitle(spec.title)
+                .setContentText(spec.text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(spec.text))
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .build()
+            try {
+                manager.notify(id, notification)
+            } catch (_: SecurityException) {
+                return
+            }
+        }
+    }
+
+    companion object {
+        const val CHANNEL_ID = "changes"
+    }
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+object BackgroundModule {
+    @Provides fun scheduler(impl: PeriodicSyncScheduler): SyncScheduler = impl
+    @Provides fun session(impl: BackgroundSessionPreparer): SyncSession = impl
+    @Provides fun notifier(impl: AndroidChangeNotifier): ChangeNotifier = impl
+}

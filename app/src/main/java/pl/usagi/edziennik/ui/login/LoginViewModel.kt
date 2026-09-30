@@ -27,6 +27,7 @@ import pl.usagi.edziennik.repository.MessagesRepository
 import pl.usagi.edziennik.repository.StudentRepository
 import pl.usagi.edziennik.persistence.changes.SnapshotStore
 import javax.inject.Inject
+import pl.usagi.edziennik.background.SyncScheduler
 
 @HiltViewModel
 class LoginViewModel @Inject constructor(
@@ -40,6 +41,7 @@ class LoginViewModel @Inject constructor(
     private val activeStudentManager: ActiveStudentManager,
     private val localSnapshotIdentity: LocalSnapshotIdentity,
     private val snapshotStore: SnapshotStore,
+    private val syncScheduler: SyncScheduler,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
@@ -114,6 +116,7 @@ class LoginViewModel @Inject constructor(
                         replaceSnapshotAccount()
                         loadLoggedInUser()
                         loadStudents()
+                        scheduleSnapshotSyncIfAccountAvailable()
                     }
                 }
                 AutoDetectLoginResult.InvalidCredentials,
@@ -144,6 +147,7 @@ class LoginViewModel @Inject constructor(
 
     fun clearSession() {
         viewModelScope.launch {
+            syncScheduler.cancel()
             sessionManager.clearSession()
             currentSession.clear()
             autoLoginSettings.setAutoLoginEnabled(false)
@@ -189,6 +193,7 @@ class LoginViewModel @Inject constructor(
                     )
                 }
                 loadStudents()
+                scheduleSnapshotSyncIfAccountAvailable()
                 return@launch
             }
 
@@ -241,6 +246,7 @@ class LoginViewModel @Inject constructor(
                 runCatching { localSnapshotIdentity.ensureAccountId() }
                 loadLoggedInUser()
                 loadStudents()
+                scheduleSnapshotSyncIfAccountAvailable()
             }
         }
     }
@@ -259,6 +265,12 @@ class LoginViewModel @Inject constructor(
         val isValid = sessionManager.isSessionValid()
         if (!isValid) sessionManager.clearSession()
         return isValid
+    }
+
+    private fun scheduleSnapshotSyncIfAccountAvailable() {
+        runCatching {
+            if (localSnapshotIdentity.currentAccountId() != null) syncScheduler.schedule()
+        }
     }
 
     private suspend fun replaceSnapshotAccount() {
@@ -355,6 +367,12 @@ class LoginViewModel @Inject constructor(
         runCatching { studentRepository.getStudents() }
             .onSuccess { students ->
                 activeStudentManager.initialize(students)
+                val selected = runCatching { localSnapshotIdentity.selectedStudentScopeId() }.getOrNull()
+                if (selected != null) {
+                    students.firstOrNull {
+                        runCatching { localSnapshotIdentity.studentScopeId(it.diaryId) }.getOrNull() == selected
+                    }?.let(activeStudentManager::setActiveStudent)
+                }
                 _uiState.update { state ->
                     state.copy(
                         isLoadingStudents = false,

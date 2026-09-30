@@ -41,6 +41,9 @@ import pl.usagi.edziennik.repository.ReceivedMessagesPage
 import pl.usagi.edziennik.repository.StudentRepository
 import pl.usagi.edziennik.persistence.changes.SnapshotStore
 import pl.usagi.edziennik.persistence.changes.SnapshotWrite
+import pl.usagi.edziennik.background.SyncScheduler
+import androidx.work.ExistingPeriodicWorkPolicy
+import pl.usagi.edziennik.background.PeriodicSyncScheduler
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LoginViewModelTest {
@@ -539,19 +542,29 @@ class LoginViewModelTest {
     fun logoutInvalidatesLocalSnapshotAccountAndDeletesItsRows() = runTest {
         val identity = LocalSnapshotIdentity(FakeLocalIdentityStore())
         val snapshots = FakeSnapshotStore()
+        val scheduler = FakeSyncScheduler()
         val viewModel = createViewModel(
             sessionManager = FakeSessionManager(validatePersistedSessionResult = true),
             localSnapshotIdentity = identity,
             snapshotStore = snapshots,
+            syncScheduler = scheduler,
         )
         advanceUntilIdle()
         val accountId = requireNotNull(identity.currentAccountId())
+        assertEquals(1, scheduler.scheduleCalls)
 
         viewModel.clearSession()
         advanceUntilIdle()
 
         assertNull(identity.currentAccountId())
         assertEquals(listOf(accountId), snapshots.deletedAccounts)
+        assertEquals(1, scheduler.cancelCalls)
+    }
+
+    @Test
+    fun repeatedSchedulingUsesUniqueKeepPolicy() {
+        assertEquals("snapshot_sync", PeriodicSyncScheduler.WORK_NAME)
+        assertEquals(ExistingPeriodicWorkPolicy.KEEP, PeriodicSyncScheduler.POLICY)
     }
 
     @Test
@@ -589,6 +602,7 @@ class LoginViewModelTest {
         messagesRepository: MessagesRepository = FakeMessagesRepository(),
         localSnapshotIdentity: LocalSnapshotIdentity = LocalSnapshotIdentity(FakeLocalIdentityStore()),
         snapshotStore: SnapshotStore = FakeSnapshotStore(),
+        syncScheduler: SyncScheduler = FakeSyncScheduler(),
     ) = LoginViewModel(
         sessionManager = sessionManager,
         autoDetectLogin = autoDetectLogin,
@@ -600,7 +614,15 @@ class LoginViewModelTest {
         activeStudentManager = ActiveStudentManager(),
         localSnapshotIdentity = localSnapshotIdentity,
         snapshotStore = snapshotStore,
+        syncScheduler = syncScheduler,
     )
+
+    private class FakeSyncScheduler : SyncScheduler {
+        var scheduleCalls = 0
+        var cancelCalls = 0
+        override fun schedule() { scheduleCalls++ }
+        override fun cancel() { cancelCalls++ }
+    }
 
     private class FakeLocalIdentityStore : LocalIdentityStore {
         private val values = mutableMapOf<String, String>()

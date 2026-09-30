@@ -2,6 +2,7 @@ package pl.usagi.edziennik.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -19,8 +20,20 @@ import pl.usagi.edziennik.ui.schooltasks.SchoolTasksRoute
 import pl.usagi.edziennik.ui.timetable.TimetableRoute
 
 @Composable
-fun EDziennikNavHost() {
+fun EDziennikNavHost(
+    notificationRoute: String?,
+    hasActiveStudent: Boolean,
+    onNotificationRouteConsumed: () -> Unit,
+) {
     val navController = rememberNavController()
+
+    LaunchedEffect(notificationRoute, hasActiveStudent) {
+        if (notificationRoute != null && hasActiveStudent) {
+            if (notificationRoute != "home") navController.navigate(notificationRoute)
+            else navController.popBackStack("home", false)
+            onNotificationRouteConsumed()
+        }
+    }
 
     NavHost(
         navController = navController,

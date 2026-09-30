@@ -1,5 +1,12 @@
 package pl.usagi.edziennik.ui.login
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -69,6 +76,16 @@ fun LoginRoute(
     viewModel: LoginViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    var notificationsGranted by remember {
+        mutableStateOf(Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
+            context, Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED)
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        notificationsGranted = it
+    }
+
 
     LoginScreen(
         state = state,
@@ -86,6 +103,8 @@ fun LoginRoute(
         onOpenTask = onOpenTask,
         onOpenMessages = onOpenMessages,
         onOpenPayments = onOpenPayments,
+        showEnableNotifications = !notificationsGranted,
+        onEnableNotifications = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
     )
 }
 
@@ -106,6 +125,8 @@ private fun LoginScreen(
     onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
     onOpenPayments: () -> Unit,
+    showEnableNotifications: Boolean,
+    onEnableNotifications: () -> Unit,
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -145,6 +166,8 @@ private fun LoginScreen(
                         onOpenMessages = onOpenMessages,
                         onOpenPayments = onOpenPayments,
                         onLogout = onClearSession,
+                        showEnableNotifications = showEnableNotifications,
+                        onEnableNotifications = onEnableNotifications,
                     )
                     LoginScreenMode.PickStudent -> StudentPickerContent(
                         students = state.students,

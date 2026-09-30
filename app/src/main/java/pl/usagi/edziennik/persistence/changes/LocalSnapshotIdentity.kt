@@ -54,9 +54,19 @@ class LocalSnapshotIdentity @Inject constructor(private val store: LocalIdentity
     }
 
     @Synchronized
+    fun selectedStudentScopeId(): LocalStudentScopeId? =
+        store.get(SELECTED_STUDENT)?.let(::LocalStudentScopeId)
+
+    @Synchronized
+    fun selectStudent(diaryId: Int) {
+        store.put(SELECTED_STUDENT, studentScopeId(diaryId).value)
+    }
+
+    @Synchronized
     fun clearAccount(): LocalAccountId? = currentAccountId().also { store.clear() }
 
     private companion object {
         const val ACCOUNT_ID = "account_id"
+        const val SELECTED_STUDENT = "selected_student"
     }
 }

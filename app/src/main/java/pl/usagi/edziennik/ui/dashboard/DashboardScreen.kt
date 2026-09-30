@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.Mail
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.AccountBalance
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material3.ButtonDefaults
@@ -74,6 +75,8 @@ fun DashboardRoute(
     onOpenMessages: () -> Unit,
     onOpenPayments: () -> Unit,
     onLogout: () -> Unit,
+    showEnableNotifications: Boolean = false,
+    onEnableNotifications: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -93,6 +96,8 @@ fun DashboardRoute(
         onOpenMessages = onOpenMessages,
         onOpenPayments = onOpenPayments,
         onLogout = onLogout,
+        showEnableNotifications = showEnableNotifications,
+        onEnableNotifications = onEnableNotifications,
     )
 }
 
@@ -112,6 +117,8 @@ private fun DashboardScreen(
     onOpenMessages: () -> Unit,
     onOpenPayments: () -> Unit,
     onLogout: () -> Unit,
+    showEnableNotifications: Boolean,
+    onEnableNotifications: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
 
@@ -165,6 +172,16 @@ private fun DashboardScreen(
                     onOpenPayments = onOpenPayments,
                     unreadMessagesBadge = state.unreadMessagesCount.data.dashboardUnreadBadgeLabel(),
                 )
+            }
+
+            if (showEnableNotifications) {
+                item {
+                    TextButton(onClick = onEnableNotifications) {
+                        Icon(Icons.Outlined.Notifications, contentDescription = null)
+                        Spacer(modifier = Modifier.width(spacing.xs))
+                        Text("Włącz powiadomienia")
+                    }
+                }
             }
 
             item {

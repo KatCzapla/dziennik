@@ -21,4 +21,7 @@ object SnapshotModule {
 
     @Provides @Singleton
     fun identityStore(store: SharedPreferencesLocalIdentityStore): LocalIdentityStore = store
+
+    @Provides
+    fun synchronizer(sync: OneShotSnapshotSync): SnapshotSynchronizer = sync
 }

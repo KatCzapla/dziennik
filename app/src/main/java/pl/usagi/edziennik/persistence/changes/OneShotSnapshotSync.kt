@@ -35,6 +35,10 @@ data class OneShotSyncResult(
     val issues: Map<SnapshotArea, SyncIssue>,
 )
 
+interface SnapshotSynchronizer {
+    suspend fun syncOnce(): OneShotSyncResult
+}
+
 class OneShotSnapshotSync @Inject constructor(
     private val identity: LocalSnapshotIdentity,
     private val activeStudentManager: ActiveStudentManager,
@@ -47,8 +51,8 @@ class OneShotSnapshotSync @Inject constructor(
     private val dashboardRepository: DashboardRepository,
     private val paymentsRepository: PaymentsRepository,
     private val clock: Clock,
-) {
-    suspend fun syncOnce(): OneShotSyncResult {
+) : SnapshotSynchronizer {
+    override suspend fun syncOnce(): OneShotSyncResult {
         val accountId = identity.currentAccountId()
             ?: return OneShotSyncResult(emptyList(), SnapshotArea.entries.associateWith { SyncIssue.FAILED })
         val student = activeStudentManager.activeStudent.value

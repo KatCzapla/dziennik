@@ -5,8 +5,12 @@ import pl.usagi.edziennik.ui.navigation.EDziennikNavHost
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 
 @Composable
-fun EDziennikApp() {
+fun EDziennikApp(
+    notificationRoute: String? = null,
+    hasActiveStudent: Boolean = false,
+    onNotificationRouteConsumed: () -> Unit = {},
+) {
     EDziennikTheme {
-        EDziennikNavHost()
+        EDziennikNavHost(notificationRoute, hasActiveStudent, onNotificationRouteConsumed)
     }
 }
