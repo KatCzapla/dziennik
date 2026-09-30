@@ -2,4 +2,9 @@
 <full-backup-content>
     <exclude domain="sharedpref" path="uonet_cookie_jar.xml" />
     <exclude domain="sharedpref" path="auto_login_settings.xml" />
+    <exclude domain="sharedpref" path="snapshot_identity.xml" />
+    <exclude domain="database" path="student_snapshots.db" />
+    <exclude domain="database" path="student_snapshots.db-wal" />
+    <exclude domain="database" path="student_snapshots.db-shm" />
+    <exclude domain="database" path="student_snapshots.db-journal" />
 </full-backup-content>

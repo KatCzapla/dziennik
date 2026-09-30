@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.domain.changes.LocalAccountId
+import pl.usagi.edziennik.persistence.changes.LocalSnapshotIdentity
 import pl.usagi.edziennik.network.credentials.CredentialStore
 import pl.usagi.edziennik.network.credentials.StoredCredentials
 import pl.usagi.edziennik.network.session.AutoLoginSettings
@@ -23,6 +25,7 @@ import pl.usagi.edziennik.network.session.SessionManager
 import pl.usagi.edziennik.network.session.toLoggedInUser
 import pl.usagi.edziennik.repository.MessagesRepository
 import pl.usagi.edziennik.repository.StudentRepository
+import pl.usagi.edziennik.persistence.changes.SnapshotStore
 import javax.inject.Inject
 
 @HiltViewModel
@@ -35,6 +38,8 @@ class LoginViewModel @Inject constructor(
     private val autoLoginSettings: AutoLoginSettings,
     private val studentRepository: StudentRepository,
     private val activeStudentManager: ActiveStudentManager,
+    private val localSnapshotIdentity: LocalSnapshotIdentity,
+    private val snapshotStore: SnapshotStore,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
@@ -106,6 +111,7 @@ class LoginViewModel @Inject constructor(
                         )
                     }
                     if (isValid) {
+                        replaceSnapshotAccount()
                         loadLoggedInUser()
                         loadStudents()
                     }
@@ -143,6 +149,7 @@ class LoginViewModel @Inject constructor(
             autoLoginSettings.setAutoLoginEnabled(false)
             autoLoginSettings.setAuthenticationProvider(null)
             activeStudentManager.clear()
+            clearSnapshotAccount()
             _uiState.update {
                 LoginUiState(
                     isCheckingSession = false,
@@ -169,6 +176,7 @@ class LoginViewModel @Inject constructor(
             currentSession.restore(savedProvider ?: AuthenticationProvider.PROJECT_UONET)
             val isValid = sessionManager.validatePersistedSession()
             if (isValid) {
+                runCatching { localSnapshotIdentity.ensureAccountId() }
                 if (savedProvider == null) {
                     autoLoginSettings.setAuthenticationProvider(AuthenticationProvider.PROJECT_UONET)
                 }
@@ -230,6 +238,7 @@ class LoginViewModel @Inject constructor(
                 )
             }
             if (renewed) {
+                runCatching { localSnapshotIdentity.ensureAccountId() }
                 loadLoggedInUser()
                 loadStudents()
             }
@@ -250,6 +259,28 @@ class LoginViewModel @Inject constructor(
         val isValid = sessionManager.isSessionValid()
         if (!isValid) sessionManager.clearSession()
         return isValid
+    }
+
+    private suspend fun replaceSnapshotAccount() {
+        val oldId = runCatching { localSnapshotIdentity.currentAccountId() }.getOrNull()
+        runCatching { localSnapshotIdentity.replaceAccountId() }
+            .onFailure { runCatching { localSnapshotIdentity.clearAccount() } }
+        oldId?.let { deleteSnapshotsSafely(it) }
+    }
+
+    private suspend fun clearSnapshotAccount() {
+        val oldId = runCatching { localSnapshotIdentity.clearAccount() }.getOrNull()
+        oldId?.let { deleteSnapshotsSafely(it) }
+    }
+
+    private suspend fun deleteSnapshotsSafely(accountId: LocalAccountId) {
+        try {
+            snapshotStore.deleteAccount(accountId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // The local account ID is already invalidated, so these rows cannot be reused.
+        }
     }
 
     private suspend fun persistCredentialsAfterSuccessfulLogin(

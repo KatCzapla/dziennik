@@ -9,6 +9,7 @@ import okhttp3.CookieJar
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -16,6 +17,11 @@ import org.junit.Test
 import pl.usagi.edziennik.MainDispatcherRule
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.domain.changes.ChangeEvent
+import pl.usagi.edziennik.domain.changes.LocalAccountId
+import pl.usagi.edziennik.persistence.changes.LocalIdentityStore
+import pl.usagi.edziennik.persistence.changes.LocalSnapshotIdentity
+import pl.usagi.edziennik.domain.changes.SnapshotScope
 import pl.usagi.edziennik.domain.Mailbox
 import pl.usagi.edziennik.domain.MessageDetails
 import pl.usagi.edziennik.domain.MessageMailboxType
@@ -33,6 +39,8 @@ import pl.usagi.edziennik.network.session.SessionManager
 import pl.usagi.edziennik.repository.MessagesRepository
 import pl.usagi.edziennik.repository.ReceivedMessagesPage
 import pl.usagi.edziennik.repository.StudentRepository
+import pl.usagi.edziennik.persistence.changes.SnapshotStore
+import pl.usagi.edziennik.persistence.changes.SnapshotWrite
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LoginViewModelTest {
@@ -292,6 +300,28 @@ class LoginViewModelTest {
     }
 
     @Test
+    fun successfulManualLoginReplacesPreviousLocalSnapshotAccount() = runTest {
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore())
+        val previousId = identity.ensureAccountId()
+        val snapshots = FakeSnapshotStore()
+        val sessionManager = FakeSessionManager(isSessionValidResult = true)
+        val viewModel = createViewModel(
+            sessionManager = sessionManager,
+            localSnapshotIdentity = identity,
+            snapshotStore = snapshots,
+        )
+        advanceUntilIdle()
+
+        viewModel.onLoginChanged("user")
+        viewModel.onPasswordChanged("password")
+        viewModel.login()
+        advanceUntilIdle()
+
+        assertNotEquals(previousId, identity.currentAccountId())
+        assertEquals(listOf(previousId), snapshots.deletedAccounts)
+    }
+
+    @Test
     fun manualLoginSuccessWithoutRememberDoesNotSaveCredentials() = runTest {
         val sessionManager = FakeSessionManager(
             validatePersistedSessionResult = false,
@@ -506,6 +536,25 @@ class LoginViewModelTest {
     }
 
     @Test
+    fun logoutInvalidatesLocalSnapshotAccountAndDeletesItsRows() = runTest {
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore())
+        val snapshots = FakeSnapshotStore()
+        val viewModel = createViewModel(
+            sessionManager = FakeSessionManager(validatePersistedSessionResult = true),
+            localSnapshotIdentity = identity,
+            snapshotStore = snapshots,
+        )
+        advanceUntilIdle()
+        val accountId = requireNotNull(identity.currentAccountId())
+
+        viewModel.clearSession()
+        advanceUntilIdle()
+
+        assertNull(identity.currentAccountId())
+        assertEquals(listOf(accountId), snapshots.deletedAccounts)
+    }
+
+    @Test
     fun clearStoredCredentialsClearsCredentialsAndDisablesAutoLogin() = runTest {
         val credentialStore = FakeCredentialStore(
             storedCredentials = StoredCredentials("user", "password"),
@@ -538,6 +587,8 @@ class LoginViewModelTest {
         ),
         currentSession: CurrentAuthenticationSession = CurrentAuthenticationSession(CookieJar.NO_COOKIES),
         messagesRepository: MessagesRepository = FakeMessagesRepository(),
+        localSnapshotIdentity: LocalSnapshotIdentity = LocalSnapshotIdentity(FakeLocalIdentityStore()),
+        snapshotStore: SnapshotStore = FakeSnapshotStore(),
     ) = LoginViewModel(
         sessionManager = sessionManager,
         autoDetectLogin = autoDetectLogin,
@@ -547,7 +598,23 @@ class LoginViewModelTest {
         autoLoginSettings = autoLoginSettings,
         studentRepository = studentRepository,
         activeStudentManager = ActiveStudentManager(),
+        localSnapshotIdentity = localSnapshotIdentity,
+        snapshotStore = snapshotStore,
     )
+
+    private class FakeLocalIdentityStore : LocalIdentityStore {
+        private val values = mutableMapOf<String, String>()
+        override fun get(key: String): String? = values[key]
+        override fun put(key: String, value: String) { values[key] = value }
+        override fun clear() { values.clear() }
+    }
+
+    private class FakeSnapshotStore : SnapshotStore {
+        val deletedAccounts = mutableListOf<LocalAccountId>()
+        override suspend fun update(scope: SnapshotScope, transform: (String?) -> SnapshotWrite): List<ChangeEvent> =
+            transform(null).events
+        override suspend fun deleteAccount(accountId: LocalAccountId) { deletedAccounts += accountId }
+    }
 
     private class FakeMessagesRepository(
         private val mailboxes: List<Mailbox> = emptyList(),

@@ -1,5 +1,13 @@
+@file:kotlinx.serialization.UseSerializers(
+    LocalDateSerializer::class,
+    LocalTimeSerializer::class,
+    LocalDateTimeSerializer::class,
+    BigDecimalSerializer::class,
+)
+
 package pl.usagi.edziennik.domain.changes
 
+import kotlinx.serialization.Serializable
 import pl.usagi.edziennik.domain.AttendanceEntry
 import pl.usagi.edziennik.domain.AttendanceStatus
 import pl.usagi.edziennik.domain.DashboardInformation
@@ -15,11 +23,13 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 
+@Serializable
 data class MessageSnapshot(val id: Int, val subject: String, val date: LocalDateTime)
 
 fun List<ReceivedMessage>.messageSnapshots(): List<MessageSnapshot> =
     map { MessageSnapshot(it.id, it.subject, it.date) }
 
+@Serializable
 data class GradeFingerprint(
     val value: String,
     val date: LocalDate,
@@ -30,6 +40,7 @@ data class GradeFingerprint(
     val correctedGradeId: Int?,
 )
 
+@Serializable
 data class GradeSnapshot(
     val periodId: Int,
     val subjectPosition: Int,
@@ -65,8 +76,10 @@ private fun Grade.fingerprint() = GradeFingerprint(
     correctedGradeId = correctedGradeId,
 )
 
+@Serializable
 data class TimetableSlot(val date: LocalDate, val start: LocalTime, val end: LocalTime)
 
+@Serializable
 data class TimetableSnapshot(
     val slot: TimetableSlot,
     val subject: String,
@@ -79,6 +92,7 @@ data class TimetableSnapshot(
     val firstSupportingTeacherAbsent: Boolean,
 )
 
+@Serializable
 data class SubstitutionSnapshot(
     val teacher: String?,
     val subject: String?,
@@ -102,26 +116,34 @@ fun List<TimetableEntry>.timetableSnapshots(): List<TimetableSnapshot> = map { e
     )
 }
 
+@Serializable
 data class AttendanceKey(val date: LocalDate, val lessonTimeId: Int?, val classLessonId: Int?)
 
+@Serializable
 data class AttendanceSnapshot(
     val key: AttendanceKey,
     val subject: String?,
-    val status: AttendanceStatus,
+    @Serializable(with = AttendanceStatusSerializer::class) val status: AttendanceStatus,
 )
 
 fun List<AttendanceEntry>.attendanceSnapshots(): List<AttendanceSnapshot> = map { entry ->
     AttendanceSnapshot(
         key = AttendanceKey(entry.date, entry.lessonTimeId, entry.classLessonId),
         subject = entry.subject,
-        status = entry.status,
+        status = when (val status = entry.status) {
+            is AttendanceStatus.Unknown -> AttendanceStatus.Unknown(status.rawValue)
+            else -> status
+        },
     )
 }
 
+@Serializable
 data class TaskKey(val rawType: Int, val id: Int)
 
+@Serializable
 data class TaskDetailsSnapshot(val description: String?, val responseDeadline: LocalDate?)
 
+@Serializable
 data class TaskSnapshot(
     val key: TaskKey,
     val date: LocalDate,
@@ -140,15 +162,19 @@ fun List<SchoolTask>.taskSnapshots(): List<TaskSnapshot> = map { task ->
     )
 }
 
+@Serializable
 data class InformationKey(val date: LocalDate, val subject: String)
 
+@Serializable
 data class InformationSnapshot(val key: InformationKey)
 
 fun List<DashboardInformation>.informationSnapshots(): List<InformationSnapshot> =
     map { InformationSnapshot(InformationKey(it.date, it.subject)) }
 
+@Serializable
 data class PaymentAccountSnapshot(val operationName: String?, val amountDue: BigDecimal?)
 
+@Serializable
 data class PaymentsSnapshot(val accounts: List<PaymentAccountSnapshot>)
 
 fun Payments.toSnapshot(): PaymentsSnapshot = PaymentsSnapshot(
