@@ -25,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -90,6 +92,10 @@ fun AttendanceRoute(
         onStudentSelected = viewModel::selectStudent,
         onViewSelected = viewModel::selectView,
         onSubjectSelected = viewModel::selectSubject,
+        onOpenExcuse = viewModel::openExcuse,
+        onExcuseContentChanged = viewModel::changeExcuseContent,
+        onSubmitExcuse = viewModel::submitExcuse,
+        onDismissExcuse = viewModel::dismissExcuse,
     )
 }
 
@@ -105,6 +111,10 @@ private fun AttendanceScreen(
     onStudentSelected: (Student) -> Unit,
     onViewSelected: (AttendanceView) -> Unit,
     onSubjectSelected: (Int) -> Unit,
+    onOpenExcuse: (AttendanceEntry) -> Unit,
+    onExcuseContentChanged: (String) -> Unit,
+    onSubmitExcuse: () -> Unit,
+    onDismissExcuse: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
     val firstPagerDate = remember(state.schoolYearRange) {
@@ -222,6 +232,8 @@ private fun AttendanceScreen(
                                 } else {
                                     state.weekEntries.filter { it.date == pageDate }
                                 },
+                                canSubmitExcuse = state::canSubmitExcuse,
+                                onOpenExcuse = onOpenExcuse,
                             )
                         }
 
@@ -238,6 +250,46 @@ private fun AttendanceScreen(
                 }
             }
         }
+    }
+
+    if (state.excuseEntry != null) {
+        AlertDialog(
+            onDismissRequest = onDismissExcuse,
+            title = { Text("Usprawiedliw lekcję") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
+                    OutlinedTextField(
+                        value = state.excuseContent,
+                        onValueChange = onExcuseContentChanged,
+                        enabled = !state.isSubmittingExcuse,
+                        label = { Text("Uzasadnienie (opcjonalne)") },
+                        supportingText = {
+                            Text("${state.excuseContent.codePointCount(0, state.excuseContent.length)}/256")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        maxLines = 5,
+                    )
+                    state.excuseErrorMessage?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onSubmitExcuse, enabled = !state.isSubmittingExcuse) {
+                    if (state.isSubmittingExcuse) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(spacing.xs))
+                    }
+                    Text("Wyślij")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissExcuse, enabled = !state.isSubmittingExcuse) {
+                    Text("Anuluj")
+                }
+            },
+        )
     }
 }
 
@@ -431,6 +483,8 @@ private fun DaySelectorItem(
 private fun DayAttendancePage(
     date: LocalDate,
     entries: List<AttendanceEntry>,
+    canSubmitExcuse: (AttendanceEntry) -> Boolean,
+    onOpenExcuse: (AttendanceEntry) -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
 
@@ -457,7 +511,7 @@ private fun DayAttendancePage(
             items(
                 entries,
                 key = { entry -> "${entry.date}-${entry.lessonTimeId}-${entry.classLessonId}-${entry.startTime}" }) { entry ->
-                AttendanceRow(entry = entry)
+                AttendanceRow(entry = entry, canSubmitExcuse = canSubmitExcuse(entry), onOpenExcuse = onOpenExcuse)
             }
             item {
                 Spacer(modifier = Modifier.height(spacing.md))
@@ -467,7 +521,11 @@ private fun DayAttendancePage(
 }
 
 @Composable
-private fun AttendanceRow(entry: AttendanceEntry) {
+private fun AttendanceRow(
+    entry: AttendanceEntry,
+    canSubmitExcuse: Boolean,
+    onOpenExcuse: (AttendanceEntry) -> Unit,
+) {
     val spacing = EDziennikTheme.spacing
 
     Row(
@@ -532,6 +590,11 @@ private fun AttendanceRow(entry: AttendanceEntry) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (canSubmitExcuse) {
+                TextButton(onClick = { onOpenExcuse(entry) }) {
+                    Text("Usprawiedliw")
+                }
             }
         }
     }

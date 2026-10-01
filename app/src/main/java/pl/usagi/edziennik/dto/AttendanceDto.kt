@@ -63,8 +63,23 @@ data class AttendanceMonthStatisticsDto(
 
 @Serializable
 data class AttendanceExcusesResponseDto(
+    @SerialName("usprawiedliwieniaAktywne")
+    val active: Boolean? = null,
     @SerialName("usprawiedliwienia")
     val excuses: List<AttendanceExcuseDto> = emptyList(),
+)
+
+@Serializable
+data class SubmitAttendanceExcuseDto(
+    @SerialName("key") val studentKey: String,
+    @SerialName("tresc") val content: String,
+    @SerialName("usprawiedliwienia") val excuses: List<SubmitAttendanceExcuseLessonDto>,
+)
+
+@Serializable
+data class SubmitAttendanceExcuseLessonDto(
+    @SerialName("dzien") val day: String,
+    @SerialName("idPoraLekcji") val lessonTimeId: Int,
 )
 
 @Serializable

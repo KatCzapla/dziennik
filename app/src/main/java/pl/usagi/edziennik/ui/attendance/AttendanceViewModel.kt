@@ -11,6 +11,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import pl.usagi.edziennik.domain.ActiveStudentManager
+import pl.usagi.edziennik.domain.AttendanceEntry
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.AttendanceSubject
 import pl.usagi.edziennik.domain.time.WeekRange
@@ -83,7 +84,9 @@ class AttendanceViewModel @Inject constructor(
         if (WeekRange.fromDate(date).start.isAfter(WeekRange.fromDate(latestSelectableDate).start)) return
 
         val previousWeek = _uiState.value.displayedWeek
-        _uiState.update { state -> state.copy(selectedDate = date) }
+        _uiState.update { state ->
+            state.copy(selectedDate = date, excuseEntry = if (state.isSubmittingExcuse) state.excuseEntry else null)
+        }
         if (WeekRange.fromDate(date) != previousWeek) {
             loadedWeek = null
             loadAttendance()
@@ -119,6 +122,52 @@ class AttendanceViewModel @Inject constructor(
         activeStudentManager.setActiveStudent(student)
     }
 
+    fun openExcuse(entry: AttendanceEntry) {
+        if (!_uiState.value.canSubmitExcuse(entry) || _uiState.value.isSubmittingExcuse) return
+        _uiState.update { it.copy(excuseEntry = entry, excuseContent = "", excuseErrorMessage = null) }
+    }
+
+    fun changeExcuseContent(content: String) {
+        if (content.codePointCount(0, content.length) > 256 || _uiState.value.isSubmittingExcuse) return
+        _uiState.update { it.copy(excuseContent = content, excuseErrorMessage = null) }
+    }
+
+    fun dismissExcuse() {
+        if (_uiState.value.isSubmittingExcuse) return
+        _uiState.update { it.copy(excuseEntry = null, excuseErrorMessage = null) }
+    }
+
+    fun submitExcuse() {
+        val state = _uiState.value
+        val entry = state.excuseEntry ?: return
+        val lessonTimeId = entry.lessonTimeId ?: return
+        val student = state.activeStudent ?: return
+        if (state.isSubmittingExcuse || !state.canSubmitExcuse(entry)) return
+        _uiState.update { it.copy(isSubmittingExcuse = true, excuseErrorMessage = null) }
+        viewModelScope.launch {
+            try {
+                attendanceRepository.submitExcuse(entry.date, lessonTimeId, state.excuseContent)
+                if (activeStudentManager.activeStudent.value != student) return@launch
+                _uiState.update {
+                    it.copy(
+                        isSubmittingExcuse = false,
+                        excuseEntry = null,
+                        excuseContent = "",
+                        submittedExcuseKeys = it.submittedExcuseKeys + (entry.date to lessonTimeId),
+                    )
+                }
+                loadAttendance(force = true)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (activeStudentManager.activeStudent.value != student) return@launch
+                _uiState.update {
+                    it.copy(isSubmittingExcuse = false, excuseErrorMessage = error.toExcuseSubmitErrorMessage())
+                }
+            }
+        }
+    }
+
     private fun observeStudents() {
         viewModelScope.launch {
             activeStudentManager.students.collect { students ->
@@ -146,6 +195,13 @@ class AttendanceViewModel @Inject constructor(
                         statistics = null,
                         isStatisticsLoading = false,
                         statisticsErrorMessage = null,
+                        excusesActive = null,
+                        excusesComplete = false,
+                        submittedExcuseKeys = emptySet(),
+                        excuseEntry = null,
+                        excuseContent = "",
+                        isSubmittingExcuse = false,
+                        excuseErrorMessage = null,
                         errorMessage = if (student == null) {
                             "Wybierz ucznia, aby zobaczyć frekwencję."
                         } else {
@@ -220,6 +276,8 @@ class AttendanceViewModel @Inject constructor(
             _uiState.update { state ->
                 state.copy(
                     weekEntries = emptyList(),
+                    excusesActive = null,
+                    excusesComplete = false,
                     isLoading = false,
                     errorMessage = "Wybierz ucznia, aby zobaczyć frekwencję.",
                 )
@@ -236,11 +294,13 @@ class AttendanceViewModel @Inject constructor(
                 state.copy(
                     isLoading = true,
                     errorMessage = null,
+                    excusesActive = null,
+                    excusesComplete = false,
                 )
             }
 
             try {
-                val entries = attendanceRepository.getAttendance(
+                val fetched = attendanceRepository.getAttendanceWithCompleteness(
                     from = week.clampedSchoolWeekStart(schoolYearRange),
                     to = week.clampedSchoolWeekEnd(schoolYearRange),
                 )
@@ -248,9 +308,11 @@ class AttendanceViewModel @Inject constructor(
                     _uiState.value.displayedWeek != week) return@launch
                 _uiState.update { state ->
                     state.copy(
-                        weekEntries = entries,
+                        weekEntries = fetched.entries,
                         isLoading = false,
                         errorMessage = null,
+                        excusesActive = fetched.excusesActive,
+                        excusesComplete = fetched.excusesComplete && fetched.entriesComplete,
                     )
                 }
                 loadedWeek = week
@@ -264,6 +326,8 @@ class AttendanceViewModel @Inject constructor(
                         weekEntries = emptyList(),
                         isLoading = false,
                         errorMessage = error.toAttendanceErrorMessage(),
+                        excusesActive = null,
+                        excusesComplete = false,
                     )
                 }
                 loadedWeek = null

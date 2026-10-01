@@ -8,6 +8,7 @@ import pl.usagi.edziennik.dto.AttendanceResponseDto
 import pl.usagi.edziennik.dto.AttendanceExcusesResponseDto
 import pl.usagi.edziennik.dto.AttendanceStatisticsDto
 import pl.usagi.edziennik.dto.AttendanceSubjectDto
+import pl.usagi.edziennik.dto.SubmitAttendanceExcuseDto
 import pl.usagi.edziennik.network.UonetApiClient
 import javax.inject.Inject
 
@@ -67,6 +68,15 @@ class UonetAttendanceDataSource @Inject constructor(
 
         try {
             apiClient.get(url, AttendanceExcusesResponseDto.serializer())
+        } catch (failure: UonetApiClient.Failure) {
+            throw failure.toAttendanceFetchException()
+        }
+    }
+
+    suspend fun submitExcuse(request: SubmitAttendanceExcuseDto) = withContext(Dispatchers.IO) {
+        val url = API_URL.toHttpUrl().newBuilder().addPathSegment("Usprawiedliwienia").build()
+        try {
+            apiClient.post(url, request, SubmitAttendanceExcuseDto.serializer())
         } catch (failure: UonetApiClient.Failure) {
             throw failure.toAttendanceFetchException()
         }

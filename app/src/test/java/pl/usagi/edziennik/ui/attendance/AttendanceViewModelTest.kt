@@ -5,6 +5,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -14,11 +15,13 @@ import pl.usagi.edziennik.MainDispatcherRule
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.AttendanceEntry
 import pl.usagi.edziennik.domain.AttendanceStatus
+import pl.usagi.edziennik.domain.AttendanceExcuseStatus
 import pl.usagi.edziennik.domain.AttendanceStatistics
 import pl.usagi.edziennik.domain.AttendanceSubject
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.time.WeekRange
 import pl.usagi.edziennik.repository.AttendanceRepository
+import pl.usagi.edziennik.repository.AttendanceFetchResult
 import java.io.IOException
 import java.time.Clock
 import java.time.LocalDate
@@ -32,6 +35,92 @@ import kotlin.coroutines.suspendCoroutine
 class AttendanceViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+
+    @Test
+    fun submittingBlocksSecondRequestAndRefreshesServerStatus() = runTest {
+        val repository = ExcuseRepository()
+        val manager = ActiveStudentManager()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        val entry = viewModel.uiState.value.weekEntries.single()
+
+        viewModel.openExcuse(entry)
+        viewModel.changeExcuseContent("Proszę usprawiedliwić")
+        viewModel.submitExcuse()
+        runCurrent()
+        viewModel.submitExcuse()
+        assertTrue(viewModel.uiState.value.isSubmittingExcuse)
+        assertEquals(1, repository.submitCalls)
+
+        repository.entry = repository.entry.copy(excuseStatus = AttendanceExcuseStatus.Pending)
+        repository.post.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(2, repository.fetchCalls)
+        assertEquals(AttendanceExcuseStatus.Pending, viewModel.uiState.value.weekEntries.single().excuseStatus)
+        assertEquals(null, viewModel.uiState.value.excuseEntry)
+        assertFalse(viewModel.uiState.value.canSubmitExcuse(viewModel.uiState.value.weekEntries.single()))
+    }
+
+    @Test
+    fun failedPostKeepsDraftAndShowsError() = runTest {
+        val repository = ExcuseRepository()
+        val manager = ActiveStudentManager()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        viewModel.openExcuse(viewModel.uiState.value.weekEntries.single())
+        viewModel.changeExcuseContent("Powód")
+        viewModel.submitExcuse()
+        runCurrent()
+        repository.post.completeExceptionally(IOException("offline"))
+        advanceUntilIdle()
+
+        assertEquals(1, repository.fetchCalls)
+        assertEquals("Powód", viewModel.uiState.value.excuseContent)
+        assertTrue(viewModel.uiState.value.excuseErrorMessage!!.contains("Nie udało się"))
+        assertFalse(viewModel.uiState.value.isSubmittingExcuse)
+    }
+
+    @Test
+    fun contentStopsAt256CharactersAndAllowsEmpty() = runTest {
+        val repository = ExcuseRepository()
+        val manager = ActiveStudentManager()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        viewModel.openExcuse(viewModel.uiState.value.weekEntries.single())
+        assertEquals("", viewModel.uiState.value.excuseContent)
+        viewModel.changeExcuseContent("a".repeat(256))
+        assertEquals(256, viewModel.uiState.value.excuseContent.length)
+        viewModel.changeExcuseContent("a".repeat(257))
+        assertEquals(256, viewModel.uiState.value.excuseContent.length)
+    }
+
+    private class ExcuseRepository : AttendanceRepository {
+        var entry = attendanceEntry().copy(date = LocalDate.of(2026, 9, 15), status = AttendanceStatus.Absent)
+        var fetchCalls = 0
+        var submitCalls = 0
+        val post = CompletableDeferred<Unit>()
+
+        override suspend fun getAttendance(from: LocalDate, to: LocalDate): List<AttendanceEntry> = listOf(entry)
+
+        override suspend fun getAttendanceWithCompleteness(from: LocalDate, to: LocalDate): AttendanceFetchResult {
+            fetchCalls++
+            return AttendanceFetchResult(listOf(entry), excusesComplete = true, excusesActive = true)
+        }
+
+        override suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int, content: String) {
+            submitCalls++
+            assertEquals(entry.date, date)
+            assertEquals(entry.lessonTimeId, lessonTimeId)
+            post.await()
+        }
+
+        override suspend fun getSubjects(): List<AttendanceSubject> = emptyList()
+        override suspend fun getStatistics(subjectId: Int): AttendanceStatistics = AttendanceStatistics(null, emptyList())
+    }
 
     @Test
     fun lateWeekResponseCannotReplaceNewerWeek() = runTest {

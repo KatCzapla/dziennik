@@ -20,3 +20,9 @@ fun Throwable.toAttendanceErrorMessage(): String =
         else ->
             "Nie udało się pobrać frekwencji."
     }
+
+fun Throwable.toExcuseSubmitErrorMessage(): String = when (this) {
+    is AttendanceFetchException.Network -> "Nie udało się wysłać usprawiedliwienia. Sprawdź połączenie."
+    is AttendanceFetchException.Http -> "Serwer nie przyjął usprawiedliwienia. Spróbuj ponownie."
+    else -> "Nie udało się wysłać usprawiedliwienia. Spróbuj ponownie."
+}

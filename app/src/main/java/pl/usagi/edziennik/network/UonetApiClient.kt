@@ -1,11 +1,14 @@
 package pl.usagi.edziennik.network
 
 import kotlinx.serialization.DeserializationStrategy
+import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 import javax.inject.Inject
@@ -49,6 +52,22 @@ class UonetApiClient @Inject constructor(
         }
     }
 
+    fun <T> post(url: HttpUrl, body: T, serializer: SerializationStrategy<T>) {
+        val request = Request.Builder()
+            .url(url)
+            .header("Accept", ACCEPT_JSON)
+            .post(json.encodeToString(serializer, body).toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+
+        try {
+            okHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw Failure.Http(response.code)
+            }
+        } catch (exception: IOException) {
+            throw Failure.Network(exception)
+        }
+    }
+
     sealed class Failure(cause: Throwable? = null) : Exception(cause) {
         class Network(val networkCause: IOException) : Failure(networkCause)
 
@@ -59,5 +78,6 @@ class UonetApiClient @Inject constructor(
 
     private companion object {
         const val ACCEPT_JSON = "application/json, text/plain, */*"
+        val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 }

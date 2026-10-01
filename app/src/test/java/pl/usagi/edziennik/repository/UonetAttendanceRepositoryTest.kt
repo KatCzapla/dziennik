@@ -2,6 +2,9 @@ package pl.usagi.edziennik.repository
 
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -75,6 +78,51 @@ class UonetAttendanceRepositoryTest {
         assertNull(result.entries.single().excuseStatus)
     }
 
+    @Test
+    fun submitSingleLessonUsesActiveStudentKeyAndDate() = runTest {
+        val requests = mutableListOf<Request>()
+        val repository = repository(requests = requests)
+
+        repository.submitExcuse(LocalDate.of(2026, 9, 15), 1568, "Proszę usprawiedliwić")
+
+        val request = requests.single()
+        val body = Json.parseToJsonElement(request.body!!.let { body ->
+            okio.Buffer().also { body.writeTo(it) }.readUtf8()
+        }).jsonObject
+        assertEquals("POST", request.method)
+        assertEquals("Usprawiedliwienia", request.url.encodedPath.substringAfterLast('/'))
+        assertNull(request.url.queryParameter("key"))
+        assertEquals("test-student-key", body.getValue("key").jsonPrimitive.content)
+        assertEquals("Proszę usprawiedliwić", body.getValue("tresc").jsonPrimitive.content)
+        val lesson = body.getValue("usprawiedliwienia").jsonArray.single().jsonObject
+        assertEquals("1568", lesson.getValue("idPoraLekcji").jsonPrimitive.content)
+        assertEquals("2026-09-15T00:00:00+02:00", lesson.getValue("dzien").jsonPrimitive.content)
+    }
+
+    @Test
+    fun submitAllowsEmptyAndExactly256Characters() = runTest {
+        val requests = mutableListOf<Request>()
+        val repository = repository(requests = requests)
+
+        repository.submitExcuse(weekStart, 12, "")
+        repository.submitExcuse(weekStart, 12, "a".repeat(256))
+
+        val bodies = requests.map { request ->
+            Json.parseToJsonElement(okio.Buffer().also { request.body!!.writeTo(it) }.readUtf8())
+                .jsonObject.getValue("tresc").jsonPrimitive.content
+        }
+        assertEquals(listOf("", "a".repeat(256)), bodies)
+    }
+
+    @Test
+    fun getExposesActiveFlagWithoutInterpretingBlockade() = runTest {
+        val result = repository(excusesResponse = """{"usprawiedliwieniaAktywne":false,"usprawiedliwienia":[]}""")
+            .getAttendanceWithCompleteness(weekStart, weekEnd)
+
+        assertEquals(false, result.excusesActive)
+        assertEquals(true, result.excusesComplete)
+    }
+
     private fun repository(
         requests: MutableList<Request> = mutableListOf(),
         excusesHttpStatus: Int = 200,
@@ -121,7 +169,7 @@ class UonetAttendanceRepositoryTest {
             }]}
         """
         const val excusesBody = """
-            {"usprawiedliwienia":[{
+            {"usprawiedliwieniaAktywne":true,"usprawiedliwienia":[{
               "status":0,
               "dzien":"2026-09-15T00:00:00+02:00",
               "idPoraLekcji":1568,

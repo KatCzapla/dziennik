@@ -17,10 +17,15 @@ interface AttendanceRepository {
     suspend fun getSubjects(): List<AttendanceSubject>
 
     suspend fun getStatistics(subjectId: Int): AttendanceStatistics
+
+    suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int, content: String) {
+        error("Submitting attendance excuses is not supported")
+    }
 }
 
 data class AttendanceFetchResult(
     val entries: List<AttendanceEntry>,
     val excusesComplete: Boolean,
     val entriesComplete: Boolean = true,
+    val excusesActive: Boolean? = null,
 )

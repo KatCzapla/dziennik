@@ -1,6 +1,7 @@
 package pl.usagi.edziennik.ui.attendance
 
 import pl.usagi.edziennik.domain.AttendanceEntry
+import pl.usagi.edziennik.domain.AttendanceStatus
 import pl.usagi.edziennik.domain.AttendanceStatistics
 import pl.usagi.edziennik.domain.AttendanceSubject
 import pl.usagi.edziennik.domain.Student
@@ -21,6 +22,13 @@ data class AttendanceUiState(
     val activeStudent: Student? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
+    val excusesActive: Boolean? = null,
+    val excusesComplete: Boolean = false,
+    val submittedExcuseKeys: Set<Pair<LocalDate, Int>> = emptySet(),
+    val excuseEntry: AttendanceEntry? = null,
+    val excuseContent: String = "",
+    val isSubmittingExcuse: Boolean = false,
+    val excuseErrorMessage: String? = null,
     val view: AttendanceView = AttendanceView.ENTRIES,
     val subjects: List<AttendanceSubject> = emptyList(),
     val selectedSubjectId: Int = -1,
@@ -33,6 +41,15 @@ data class AttendanceUiState(
 
     val selectedDayEntries: List<AttendanceEntry>
         get() = weekEntries.filter { it.date == selectedDate }
+
+    fun canSubmitExcuse(entry: AttendanceEntry): Boolean {
+        val lessonTimeId = entry.lessonTimeId ?: return false
+        return excusesActive == true && excusesComplete &&
+            entry.status in setOf(AttendanceStatus.Absent, AttendanceStatus.Late) &&
+            entry.excuseStatus == null &&
+            (entry.date to lessonTimeId) !in submittedExcuseKeys &&
+            weekEntries.contains(entry)
+    }
 
     val isEmpty: Boolean
         get() = !isLoading && errorMessage == null && selectedDayEntries.isEmpty()
