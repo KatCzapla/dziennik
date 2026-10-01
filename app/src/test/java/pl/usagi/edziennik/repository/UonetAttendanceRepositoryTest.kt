@@ -12,6 +12,7 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.AttendanceExcuseStatus
@@ -100,6 +101,20 @@ class UonetAttendanceRepositoryTest {
     }
 
     @Test
+    fun submitWholeDaySendsExplicitNullLessonTimeId() = runTest {
+        val requests = mutableListOf<Request>()
+        repository(requests = requests).submitExcuse(LocalDate.of(2026, 9, 16), null, "")
+
+        val body = Json.parseToJsonElement(
+            okio.Buffer().also { requests.single().body!!.writeTo(it) }.readUtf8(),
+        ).jsonObject
+        val lesson = body.getValue("usprawiedliwienia").jsonArray.single().jsonObject
+        assertTrue(lesson.containsKey("idPoraLekcji"))
+        assertEquals("null", lesson.getValue("idPoraLekcji").toString())
+        assertEquals("2026-09-16T00:00:00+02:00", lesson.getValue("dzien").jsonPrimitive.content)
+    }
+
+    @Test
     fun submitAllowsEmptyAndExactly256Characters() = runTest {
         val requests = mutableListOf<Request>()
         val repository = repository(requests = requests)
@@ -150,7 +165,7 @@ class UonetAttendanceRepositoryTest {
             }
             .build()
         val dataSource = UonetAttendanceDataSource(
-            UonetApiClient(client, Json { ignoreUnknownKeys = true }),
+            UonetApiClient(client, Json { ignoreUnknownKeys = true; explicitNulls = false }),
         )
         return UonetAttendanceRepository(studentManager, dataSource)
     }

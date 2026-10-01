@@ -63,7 +63,7 @@ class UonetAttendanceRepository @Inject constructor(
         )
     }
 
-    override suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int, content: String) {
+    override suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int?, content: String) {
         require(content.codePointCount(0, content.length) <= 256) { "Excuse content exceeds 256 characters" }
         val student = activeStudentManager.requireActiveStudent(AttendanceRepositoryException.NoActiveStudent)
         dataSource.submitExcuse(

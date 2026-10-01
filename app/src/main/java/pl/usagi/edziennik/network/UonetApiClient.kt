@@ -52,11 +52,17 @@ class UonetApiClient @Inject constructor(
         }
     }
 
-    fun <T> post(url: HttpUrl, body: T, serializer: SerializationStrategy<T>) {
+    fun <T> post(
+        url: HttpUrl,
+        body: T,
+        serializer: SerializationStrategy<T>,
+        includeNulls: Boolean = false,
+    ) {
+        val bodyJson = if (includeNulls) Json(json) { explicitNulls = true } else json
         val request = Request.Builder()
             .url(url)
             .header("Accept", ACCEPT_JSON)
-            .post(json.encodeToString(serializer, body).toRequestBody(JSON_MEDIA_TYPE))
+            .post(bodyJson.encodeToString(serializer, body).toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
         try {

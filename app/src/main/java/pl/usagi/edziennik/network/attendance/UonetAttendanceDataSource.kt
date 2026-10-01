@@ -76,7 +76,7 @@ class UonetAttendanceDataSource @Inject constructor(
     suspend fun submitExcuse(request: SubmitAttendanceExcuseDto) = withContext(Dispatchers.IO) {
         val url = API_URL.toHttpUrl().newBuilder().addPathSegment("Usprawiedliwienia").build()
         try {
-            apiClient.post(url, request, SubmitAttendanceExcuseDto.serializer())
+            apiClient.post(url, request, SubmitAttendanceExcuseDto.serializer(), includeNulls = true)
         } catch (failure: UonetApiClient.Failure) {
             throw failure.toAttendanceFetchException()
         }

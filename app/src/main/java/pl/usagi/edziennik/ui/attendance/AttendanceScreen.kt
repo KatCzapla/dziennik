@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,6 +20,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -92,7 +96,8 @@ fun AttendanceRoute(
         onStudentSelected = viewModel::selectStudent,
         onViewSelected = viewModel::selectView,
         onSubjectSelected = viewModel::selectSubject,
-        onOpenExcuse = viewModel::openExcuse,
+        onOpenExcuse = viewModel::openExcuseForSelectedDay,
+        onSelectExcuseOption = viewModel::selectExcuseOption,
         onExcuseContentChanged = viewModel::changeExcuseContent,
         onSubmitExcuse = viewModel::submitExcuse,
         onDismissExcuse = viewModel::dismissExcuse,
@@ -111,7 +116,8 @@ private fun AttendanceScreen(
     onStudentSelected: (Student) -> Unit,
     onViewSelected: (AttendanceView) -> Unit,
     onSubjectSelected: (Int) -> Unit,
-    onOpenExcuse: (AttendanceEntry) -> Unit,
+    onOpenExcuse: () -> Unit,
+    onSelectExcuseOption: (ExcuseOption) -> Unit,
     onExcuseContentChanged: (String) -> Unit,
     onSubmitExcuse: () -> Unit,
     onDismissExcuse: () -> Unit,
@@ -165,11 +171,31 @@ private fun AttendanceScreen(
                 .padding(horizontal = spacing.lg),
             verticalArrangement = Arrangement.spacedBy(spacing.md),
         ) {
-            Text(
-                text = "Frekwencja",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().height(40.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Frekwencja",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                if (state.showHeaderExcuseButton) {
+                    Box(modifier = Modifier.clip(RoundedCornerShape(12.dp))) {
+                        TextButton(
+                            onClick = onOpenExcuse,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                        ) {
+                            Text("Usprawiedliw")
+                        }
+                    }
+                }
+            }
 
             PrimaryTabRow(selectedTabIndex = state.view.ordinal) {
                 AttendanceView.entries.forEach { view ->
@@ -232,8 +258,6 @@ private fun AttendanceScreen(
                                 } else {
                                     state.weekEntries.filter { it.date == pageDate }
                                 },
-                                canSubmitExcuse = state::canSubmitExcuse,
-                                onOpenExcuse = onOpenExcuse,
                             )
                         }
 
@@ -252,12 +276,51 @@ private fun AttendanceScreen(
         }
     }
 
-    if (state.excuseEntry != null) {
+    if (state.excuseFormDate != null) {
         AlertDialog(
             onDismissRequest = onDismissExcuse,
-            title = { Text("Usprawiedliw lekcję") },
+            title = { Text("Usprawiedliw ${state.excuseFormDate.dayMonthLabel()}") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
+                Column(
+                    modifier = Modifier.heightIn(max = 430.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(spacing.sm),
+                ) {
+                    state.availableExcuseOptions.forEach { option ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable(
+                                enabled = !state.isSubmittingExcuse,
+                                onClick = { onSelectExcuseOption(option) },
+                            ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = state.selectedExcuseOption == option,
+                                onClick = { onSelectExcuseOption(option) },
+                                enabled = !state.isSubmittingExcuse,
+                            )
+                            Column {
+                                when (option) {
+                                    is ExcuseOption.Lesson -> {
+                                        Text(
+                                            "${option.entry.startTime.format(timeFormatter)}–" +
+                                                "${option.entry.endTime.format(timeFormatter)} · " +
+                                                (option.entry.subject ?: "Zajęcia"),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                        Text(
+                                            option.entry.status.label(),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    is ExcuseOption.WholeDay -> Text(
+                                        "Cały dzień",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                            }
+                        }
+                    }
                     OutlinedTextField(
                         value = state.excuseContent,
                         onValueChange = onExcuseContentChanged,
@@ -276,7 +339,10 @@ private fun AttendanceScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = onSubmitExcuse, enabled = !state.isSubmittingExcuse) {
+                TextButton(
+                    onClick = onSubmitExcuse,
+                    enabled = !state.isSubmittingExcuse && state.selectedExcuseOption != null,
+                ) {
                     if (state.isSubmittingExcuse) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(spacing.xs))
@@ -483,8 +549,6 @@ private fun DaySelectorItem(
 private fun DayAttendancePage(
     date: LocalDate,
     entries: List<AttendanceEntry>,
-    canSubmitExcuse: (AttendanceEntry) -> Boolean,
-    onOpenExcuse: (AttendanceEntry) -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
 
@@ -511,7 +575,7 @@ private fun DayAttendancePage(
             items(
                 entries,
                 key = { entry -> "${entry.date}-${entry.lessonTimeId}-${entry.classLessonId}-${entry.startTime}" }) { entry ->
-                AttendanceRow(entry = entry, canSubmitExcuse = canSubmitExcuse(entry), onOpenExcuse = onOpenExcuse)
+                AttendanceRow(entry = entry)
             }
             item {
                 Spacer(modifier = Modifier.height(spacing.md))
@@ -521,11 +585,7 @@ private fun DayAttendancePage(
 }
 
 @Composable
-private fun AttendanceRow(
-    entry: AttendanceEntry,
-    canSubmitExcuse: Boolean,
-    onOpenExcuse: (AttendanceEntry) -> Unit,
-) {
+private fun AttendanceRow(entry: AttendanceEntry) {
     val spacing = EDziennikTheme.spacing
 
     Row(
@@ -590,11 +650,6 @@ private fun AttendanceRow(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-            if (canSubmitExcuse) {
-                TextButton(onClick = { onOpenExcuse(entry) }) {
-                    Text("Usprawiedliw")
-                }
             }
         }
     }

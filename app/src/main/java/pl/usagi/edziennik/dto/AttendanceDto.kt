@@ -79,7 +79,7 @@ data class SubmitAttendanceExcuseDto(
 @Serializable
 data class SubmitAttendanceExcuseLessonDto(
     @SerialName("dzien") val day: String,
-    @SerialName("idPoraLekcji") val lessonTimeId: Int,
+    @SerialName("idPoraLekcji") val lessonTimeId: Int?,
 )
 
 @Serializable

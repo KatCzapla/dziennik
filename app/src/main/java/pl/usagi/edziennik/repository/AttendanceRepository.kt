@@ -18,7 +18,7 @@ interface AttendanceRepository {
 
     suspend fun getStatistics(subjectId: Int): AttendanceStatistics
 
-    suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int, content: String) {
+    suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int?, content: String) {
         error("Submitting attendance excuses is not supported")
     }
 }

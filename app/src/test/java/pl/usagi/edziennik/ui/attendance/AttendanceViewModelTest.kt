@@ -45,7 +45,8 @@ class AttendanceViewModelTest {
         advanceUntilIdle()
         val entry = viewModel.uiState.value.weekEntries.single()
 
-        viewModel.openExcuse(entry)
+        viewModel.openExcuseForSelectedDay()
+        viewModel.selectExcuseOption(ExcuseOption.Lesson(entry))
         viewModel.changeExcuseContent("Proszę usprawiedliwić")
         viewModel.submitExcuse()
         runCurrent()
@@ -59,7 +60,7 @@ class AttendanceViewModelTest {
 
         assertEquals(2, repository.fetchCalls)
         assertEquals(AttendanceExcuseStatus.Pending, viewModel.uiState.value.weekEntries.single().excuseStatus)
-        assertEquals(null, viewModel.uiState.value.excuseEntry)
+        assertEquals(null, viewModel.uiState.value.excuseFormDate)
         assertFalse(viewModel.uiState.value.canSubmitExcuse(viewModel.uiState.value.weekEntries.single()))
     }
 
@@ -70,7 +71,8 @@ class AttendanceViewModelTest {
         val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
         manager.initialize(listOf(firstStudent))
         advanceUntilIdle()
-        viewModel.openExcuse(viewModel.uiState.value.weekEntries.single())
+        viewModel.openExcuseForSelectedDay()
+        viewModel.selectExcuseOption(ExcuseOption.Lesson(viewModel.uiState.value.weekEntries.single()))
         viewModel.changeExcuseContent("Powód")
         viewModel.submitExcuse()
         runCurrent()
@@ -79,6 +81,7 @@ class AttendanceViewModelTest {
 
         assertEquals(1, repository.fetchCalls)
         assertEquals("Powód", viewModel.uiState.value.excuseContent)
+        assertTrue(viewModel.uiState.value.selectedExcuseOption is ExcuseOption.Lesson)
         assertTrue(viewModel.uiState.value.excuseErrorMessage!!.contains("Nie udało się"))
         assertFalse(viewModel.uiState.value.isSubmittingExcuse)
     }
@@ -90,12 +93,64 @@ class AttendanceViewModelTest {
         val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
         manager.initialize(listOf(firstStudent))
         advanceUntilIdle()
-        viewModel.openExcuse(viewModel.uiState.value.weekEntries.single())
+        viewModel.openExcuseForSelectedDay()
         assertEquals("", viewModel.uiState.value.excuseContent)
         viewModel.changeExcuseContent("a".repeat(256))
         assertEquals(256, viewModel.uiState.value.excuseContent.length)
         viewModel.changeExcuseContent("a".repeat(257))
         assertEquals(256, viewModel.uiState.value.excuseContent.length)
+    }
+
+    @Test
+    fun futureDayWithoutEntriesSubmitsWholeDayAndRefreshes() = runTest {
+        val repository = WholeDayRepository()
+        val manager = ActiveStudentManager()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        viewModel.selectDate(LocalDate.of(2026, 9, 16))
+        viewModel.openExcuseForSelectedDay()
+        val option = ExcuseOption.WholeDay(LocalDate.of(2026, 9, 16))
+        viewModel.selectExcuseOption(option)
+        viewModel.submitExcuse()
+        advanceUntilIdle()
+
+        assertEquals(option.date to null, repository.submitted)
+        assertEquals(2, repository.fetchCalls)
+        assertFalse(viewModel.uiState.value.showHeaderExcuseButton)
+    }
+
+    @Test
+    fun formKeepsOnlyOneSelectedOption() = runTest {
+        val repository = ExcuseRepository()
+        val manager = ActiveStudentManager()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+
+        viewModel.openExcuseForSelectedDay()
+        val lesson = ExcuseOption.Lesson(viewModel.uiState.value.weekEntries.single())
+        val wholeDay = ExcuseOption.WholeDay(LocalDate.of(2026, 9, 15))
+        viewModel.selectExcuseOption(lesson)
+        viewModel.selectExcuseOption(wholeDay)
+
+        assertEquals(wholeDay, viewModel.uiState.value.selectedExcuseOption)
+    }
+
+    private class WholeDayRepository : AttendanceRepository {
+        var fetchCalls = 0
+        var submitted: Pair<LocalDate, Int?>? = null
+
+        override suspend fun getAttendance(from: LocalDate, to: LocalDate): List<AttendanceEntry> = emptyList()
+        override suspend fun getAttendanceWithCompleteness(from: LocalDate, to: LocalDate): AttendanceFetchResult {
+            fetchCalls++
+            return AttendanceFetchResult(emptyList(), excusesComplete = true, excusesActive = true)
+        }
+        override suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int?, content: String) {
+            submitted = date to lessonTimeId
+        }
+        override suspend fun getSubjects(): List<AttendanceSubject> = emptyList()
+        override suspend fun getStatistics(subjectId: Int): AttendanceStatistics = AttendanceStatistics(null, emptyList())
     }
 
     private class ExcuseRepository : AttendanceRepository {
@@ -111,7 +166,7 @@ class AttendanceViewModelTest {
             return AttendanceFetchResult(listOf(entry), excusesComplete = true, excusesActive = true)
         }
 
-        override suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int, content: String) {
+        override suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int?, content: String) {
             submitCalls++
             assertEquals(entry.date, date)
             assertEquals(entry.lessonTimeId, lessonTimeId)

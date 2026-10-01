@@ -11,7 +11,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import pl.usagi.edziennik.domain.ActiveStudentManager
-import pl.usagi.edziennik.domain.AttendanceEntry
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.AttendanceSubject
 import pl.usagi.edziennik.domain.time.WeekRange
@@ -40,6 +39,7 @@ class AttendanceViewModel @Inject constructor(
             schoolYearRange = schoolYearRange,
             latestSelectableDate = latestSelectableDate,
             selectedDate = LocalDate.now(clock).attendanceDateWithinLimits(),
+            today = LocalDate.now(clock),
         ),
     )
     val uiState: StateFlow<AttendanceUiState> = _uiState.asStateFlow()
@@ -85,7 +85,11 @@ class AttendanceViewModel @Inject constructor(
 
         val previousWeek = _uiState.value.displayedWeek
         _uiState.update { state ->
-            state.copy(selectedDate = date, excuseEntry = if (state.isSubmittingExcuse) state.excuseEntry else null)
+            state.copy(
+                selectedDate = date,
+                excuseFormDate = if (state.isSubmittingExcuse) state.excuseFormDate else null,
+                selectedExcuseOption = if (state.isSubmittingExcuse) state.selectedExcuseOption else null,
+            )
         }
         if (WeekRange.fromDate(date) != previousWeek) {
             loadedWeek = null
@@ -122,9 +126,25 @@ class AttendanceViewModel @Inject constructor(
         activeStudentManager.setActiveStudent(student)
     }
 
-    fun openExcuse(entry: AttendanceEntry) {
-        if (!_uiState.value.canSubmitExcuse(entry) || _uiState.value.isSubmittingExcuse) return
-        _uiState.update { it.copy(excuseEntry = entry, excuseContent = "", excuseErrorMessage = null) }
+    fun openExcuseForSelectedDay() {
+        val state = _uiState.value
+        if (state.availableExcuseOptions.isEmpty() || state.isSubmittingExcuse) return
+        _uiState.update {
+            it.copy(
+                excuseFormDate = state.selectedDate,
+                selectedExcuseOption = null,
+                excuseContent = "",
+                excuseErrorMessage = null,
+            )
+        }
+    }
+
+    fun selectExcuseOption(option: ExcuseOption) {
+        val state = _uiState.value
+        if (state.isSubmittingExcuse || state.excuseFormDate != state.selectedDate ||
+            option !in state.availableExcuseOptions
+        ) return
+        _uiState.update { it.copy(selectedExcuseOption = option, excuseErrorMessage = null) }
     }
 
     fun changeExcuseContent(content: String) {
@@ -134,26 +154,30 @@ class AttendanceViewModel @Inject constructor(
 
     fun dismissExcuse() {
         if (_uiState.value.isSubmittingExcuse) return
-        _uiState.update { it.copy(excuseEntry = null, excuseErrorMessage = null) }
+        _uiState.update {
+            it.copy(excuseFormDate = null, selectedExcuseOption = null, excuseErrorMessage = null)
+        }
     }
 
     fun submitExcuse() {
         val state = _uiState.value
-        val entry = state.excuseEntry ?: return
-        val lessonTimeId = entry.lessonTimeId ?: return
+        val option = state.selectedExcuseOption ?: return
         val student = state.activeStudent ?: return
-        if (state.isSubmittingExcuse || !state.canSubmitExcuse(entry)) return
+        if (state.isSubmittingExcuse || state.excuseFormDate != state.selectedDate ||
+            option !in state.availableExcuseOptions
+        ) return
         _uiState.update { it.copy(isSubmittingExcuse = true, excuseErrorMessage = null) }
         viewModelScope.launch {
             try {
-                attendanceRepository.submitExcuse(entry.date, lessonTimeId, state.excuseContent)
+                attendanceRepository.submitExcuse(option.date, option.lessonTimeId, state.excuseContent)
                 if (activeStudentManager.activeStudent.value != student) return@launch
                 _uiState.update {
                     it.copy(
                         isSubmittingExcuse = false,
-                        excuseEntry = null,
+                        excuseFormDate = null,
+                        selectedExcuseOption = null,
                         excuseContent = "",
-                        submittedExcuseKeys = it.submittedExcuseKeys + (entry.date to lessonTimeId),
+                        submittedExcuseKeys = it.submittedExcuseKeys + (option.date to option.lessonTimeId),
                     )
                 }
                 loadAttendance(force = true)
@@ -198,7 +222,8 @@ class AttendanceViewModel @Inject constructor(
                         excusesActive = null,
                         excusesComplete = false,
                         submittedExcuseKeys = emptySet(),
-                        excuseEntry = null,
+                        excuseFormDate = null,
+                        selectedExcuseOption = null,
                         excuseContent = "",
                         isSubmittingExcuse = false,
                         excuseErrorMessage = null,
