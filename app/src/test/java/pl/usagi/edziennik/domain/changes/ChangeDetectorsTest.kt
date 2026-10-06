@@ -33,8 +33,14 @@ class ChangeDetectorsTest {
     }
 
     @Test fun newMessageNotifies() {
-        assertEquals(listOf(ChangeEvent.NewMessage(2, "Temat 2", day.atStartOfDay())),
+        assertEquals(listOf(ChangeEvent.NewMessage(2, "Temat 2", day.atStartOfDay(), "Nadawca")),
             detectMessages(listOf(message(1)).messageSnapshots(), listOf(message(2), message(1))))
+    }
+
+    @Test fun newMessageCarriesSenderButNotSessionKey() {
+        val event = detectMessages(emptyList(), listOf(message(2))).single() as ChangeEvent.NewMessage
+        assertEquals("Nadawca", event.sender)
+        assertTrue(!event.toString().contains("session-key"))
     }
 
     @Test fun newGradeNotifies() {
@@ -78,12 +84,33 @@ class ChangeDetectorsTest {
 
     @Test fun substitutionNotifies() {
         val event = detectTimetable(listOf(lesson()).timetableSnapshots(), listOf(lesson(substitutionChange()))).single()
-        assertTrue(event is ChangeEvent.LessonSubstituted)
+        assertEquals("Zastępca", (event as ChangeEvent.LessonSubstituted).teacher)
+    }
+
+    @Test fun substitutionTeacherComesFromChangeNotBaseLesson() {
+        val current = lesson(substitutionChange()).copy(teacher = "Nauczyciel bazowy")
+        val event = detectTimetable(listOf(lesson()).timetableSnapshots(), listOf(current)).single()
+            as ChangeEvent.LessonSubstituted
+        assertEquals("Zastępca", event.teacher)
     }
 
     @Test fun knownTeacherChangeNotifies() {
         val event = detectTimetable(listOf(lesson()).timetableSnapshots(), listOf(lesson().copy(teacher = "Nowy"))).single()
-        assertTrue(event is ChangeEvent.LessonUpdated)
+        assertEquals("Zmiana prowadzącego: Nowy", (event as ChangeEvent.LessonUpdated).details)
+    }
+
+    @Test fun knownRoomAndSupportingTeacherChangesAreDescribed() {
+        val event = detectTimetable(listOf(lesson()).timetableSnapshots(),
+            listOf(lesson().copy(room = "107", supportingTeacher1 = "Anna"))).single()
+        assertEquals("Zmiana pierwszego nauczyciela wspomagającego: Anna; Zmiana sali: 107",
+            (event as ChangeEvent.LessonUpdated).details)
+    }
+
+    @Test fun recognizedSupportingTeacherAbsenceIsDescribed() {
+        val absence = change(2, TimetableChangeKind.FirstSupportingTeacherAbsence)
+        val event = detectTimetable(listOf(lesson()).timetableSnapshots(), listOf(lesson(absence))).single()
+        assertEquals("Nieobecny nauczyciel wspomagający pierwszy",
+            (event as ChangeEvent.LessonUpdated).details)
     }
 
     @Test fun unknownChangeCodeAndReorderingDoNotNotify() {
@@ -103,6 +130,11 @@ class ChangeDetectorsTest {
         assertEquals(1, detectAttendance(emptyList(), listOf(attendance(AttendanceStatus.Late))).size)
     }
 
+    @Test fun attendanceEventCarriesStartTime() {
+        val event = detectAttendance(emptyList(), listOf(attendance(AttendanceStatus.Absent))).single()
+        assertEquals(LocalTime.of(9, 0), (event as ChangeEvent.AttendanceChanged).startTime)
+    }
+
     @Test fun presenceNeverNotifiesButStatusIsInCurrentSnapshot() {
         val old = listOf(attendance(AttendanceStatus.Absent)).attendanceSnapshots()
         val current = listOf(attendance(AttendanceStatus.Present))
@@ -120,6 +152,14 @@ class ChangeDetectorsTest {
         val original = task()
         assertTrue(detectTasks(emptyList(), listOf(original)).single() is ChangeEvent.TaskChanged)
         assertEquals(1, detectTasks(listOf(original).taskSnapshots(), listOf(original.copy(date = day.plusDays(1)))).size)
+    }
+
+    @Test fun taskEventCarriesFetchedDescriptionOnly() {
+        val withDetails = task().copy(details = SchoolTaskDetails("Rozdział 3", null, null))
+        assertEquals("Rozdział 3", (detectTasks(emptyList(), listOf(withDetails)).single()
+            as ChangeEvent.TaskChanged).description)
+        assertEquals(null, (detectTasks(emptyList(), listOf(task())).single()
+            as ChangeEvent.TaskChanged).description)
     }
 
     @Test fun missingTaskDetailsDoNotLookLikeDeletion() {

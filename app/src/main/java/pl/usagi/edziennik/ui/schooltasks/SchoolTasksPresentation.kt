@@ -55,6 +55,7 @@ fun List<SchoolTask>.groupBySchoolDay(): List<SchoolTasksDayGroup> =
 
 fun SchoolTaskType.typeLabel(): String =
     when (this) {
+        SchoolTaskType.Test -> "Sprawdzian"
         SchoolTaskType.Homework -> "Zadanie domowe"
         SchoolTaskType.Quiz -> "Kartkówka"
         is SchoolTaskType.Unknown -> "Inne"
@@ -81,7 +82,8 @@ fun SchoolTask.presentationDetailLines(): List<SchoolTaskDetailLine> {
 
 private fun SchoolTaskType.sortOrder(): Int =
     when (this) {
-        SchoolTaskType.Quiz -> 0
-        SchoolTaskType.Homework -> 1
-        is SchoolTaskType.Unknown -> 2
+        SchoolTaskType.Test -> 0
+        SchoolTaskType.Quiz -> 1
+        SchoolTaskType.Homework -> 2
+        is SchoolTaskType.Unknown -> 3
     }

@@ -19,8 +19,12 @@ import dagger.hilt.components.SingletonComponent
 import pl.usagi.edziennik.MainActivity
 import pl.usagi.edziennik.R
 import pl.usagi.edziennik.domain.AttendanceStatus
+import pl.usagi.edziennik.domain.SchoolTaskType
 import pl.usagi.edziennik.domain.changes.ChangeEvent
 import java.text.NumberFormat
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
@@ -28,30 +32,69 @@ import javax.inject.Inject
 data class NotificationSpec(val title: String, val text: String, val route: String)
 
 fun ChangeEvent.notificationSpec(): NotificationSpec = when (this) {
-    is ChangeEvent.NewMessage -> NotificationSpec("Nowa wiadomość", subject, "messages")
-    is ChangeEvent.NewGrade -> NotificationSpec("Nowa ocena", "$subjectName: $value", "grades")
-    is ChangeEvent.EditedGrade -> NotificationSpec("Zmieniona ocena", "$subjectName: $newValue", "grades")
-    is ChangeEvent.LessonCancelled -> NotificationSpec("Odwołana lekcja", subject, "timetable")
-    is ChangeEvent.LessonSubstituted -> NotificationSpec("Zastępstwo", subject, "timetable")
-    is ChangeEvent.LessonUpdated -> NotificationSpec("Zmiana planu", subject, "timetable")
+    is ChangeEvent.NewMessage -> NotificationSpec(
+        "Nowa wiadomość" + sender?.takeIf { it.isNotBlank() }?.let { " od ${it.trim()}" }.orEmpty(),
+        subject.trim(), "messages",
+    )
+    is ChangeEvent.NewGrade -> NotificationSpec("Nowa ocena", parts(value, subjectName), "grades")
+    is ChangeEvent.EditedGrade -> NotificationSpec("Edycja oceny", parts(newValue, subjectName), "grades")
+    is ChangeEvent.LessonCancelled -> NotificationSpec("Odwołana lekcja ${slot.date.shortLabel()}", subject.trim(), "timetable")
+    is ChangeEvent.LessonSubstituted -> NotificationSpec(
+        "Zastępstwo ${slot.date.shortLabel()}", parts(subject, teacher), "timetable",
+    )
+    is ChangeEvent.LessonUpdated -> NotificationSpec(
+        "Zmiana planu ${slot.date.shortLabel()}", parts(subject, details), "timetable",
+    )
     is ChangeEvent.AttendanceChanged -> NotificationSpec(
-        "Zmiana frekwencji",
-        listOfNotNull(subject, status.notificationLabel()).joinToString(": "),
+        "Frekwencja",
+        parts(status.notificationLabel(), listOfNotNull(startTime?.shortLabel(), subject?.trim()?.takeIf { it.isNotEmpty() })
+            .joinToString(" ")),
         "attendance",
     )
     is ChangeEvent.TaskChanged -> NotificationSpec(
-        if (isNew) "Nowe zadanie lub sprawdzian" else "Zmienione zadanie lub sprawdzian",
-        subject ?: date.toString(),
+        taskTitle(key.rawType, isNew, date),
+        parts(subject, description.shortened()),
         "schoolTasks?taskId=${key.id}&taskType=${key.rawType}&taskDate=$date",
     )
-    is ChangeEvent.NewInformation -> NotificationSpec("Nowa informacja", subject, "home")
+    is ChangeEvent.NewInformation -> NotificationSpec("Nowa informacja", subject.trim(), "home")
     is ChangeEvent.PaymentChanged -> NotificationSpec(
-        "Zmiana opłat",
-        listOfNotNull(operationName, amountDue?.let {
+        "Zmiana w opłatach",
+        partsWithColon(operationName, amountDue?.let {
             NumberFormat.getCurrencyInstance(Locale.forLanguageTag("pl-PL")).format(it)
-        }).joinToString(" ").ifBlank { "Sprawdź opłaty" },
+        }).ifBlank { "Sprawdź opłaty" },
         "payments",
     )
+}
+
+private val notificationDateFormat = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.forLanguageTag("pl-PL"))
+private val notificationTimeFormat = DateTimeFormatter.ofPattern("HH:mm")
+private val notificationWhitespace = Regex("\\s+")
+private const val TASK_DESCRIPTION_LIMIT = 100
+
+private fun LocalDate.shortLabel(): String = format(notificationDateFormat)
+private fun LocalTime.shortLabel(): String = format(notificationTimeFormat)
+
+private fun parts(vararg values: String?): String = values.mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
+    .joinToString(", ")
+
+private fun partsWithColon(first: String?, second: String?): String =
+    listOfNotNull(first?.trim()?.takeIf(String::isNotEmpty), second?.trim()?.takeIf(String::isNotEmpty))
+        .joinToString(": ")
+
+private fun String?.shortened(): String? {
+    val normalized = this?.replace(notificationWhitespace, " ")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return if (normalized.length <= TASK_DESCRIPTION_LIMIT) normalized
+    else normalized.take(TASK_DESCRIPTION_LIMIT).trimEnd() + "…"
+}
+
+private fun taskTitle(rawType: Int, isNew: Boolean, date: LocalDate): String {
+    val prefix = when (SchoolTaskType.fromRawValue(rawType)) {
+        SchoolTaskType.Test -> if (isNew) "Sprawdzian" else "Zmiana sprawdzianu"
+        SchoolTaskType.Quiz -> if (isNew) "Kartkówka" else "Zmiana kartkówki"
+        SchoolTaskType.Homework -> if (isNew) "Zadanie domowe" else "Zmiana zadania domowego"
+        is SchoolTaskType.Unknown -> "Sprawdziany i zadania"
+    }
+    return "$prefix ${date.shortLabel()}"
 }
 
 private fun AttendanceStatus.notificationLabel(): String = when (this) {

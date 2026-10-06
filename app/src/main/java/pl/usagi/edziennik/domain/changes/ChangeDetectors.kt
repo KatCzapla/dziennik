@@ -17,7 +17,7 @@ fun detectMessageSnapshots(old: List<MessageSnapshot>, current: List<MessageSnap
     val oldIds = old.mapTo(mutableSetOf()) { it.id }
     return current.distinctBy { it.id }
         .filter { it.id !in oldIds }
-        .map { ChangeEvent.NewMessage(it.id, it.subject, it.date) }
+        .map { ChangeEvent.NewMessage(it.id, it.subject, it.date, it.sender) }
 }
 
 fun detectGrades(old: List<GradeSnapshot>, current: Grades, periodId: Int): List<ChangeEvent> {
@@ -85,11 +85,15 @@ fun detectTimetable(old: List<TimetableSnapshot>, current: List<TimetableEntry>)
         when {
             !previous.cancelled && updated.cancelled ->
                 listOf(ChangeEvent.LessonCancelled(slot, updated.subject))
-            previous.substitutions.multiset() != updated.substitutions.multiset() && updated.substitutions.isNotEmpty() ->
-                listOf(ChangeEvent.LessonSubstituted(slot, updated.subject))
+            previous.substitutions.multiset() != updated.substitutions.multiset() && updated.substitutions.isNotEmpty() -> {
+                val added = updated.substitutions.toMutableList().apply {
+                    previous.substitutions.forEach { remove(it) }
+                }
+                listOf(ChangeEvent.LessonSubstituted(slot, updated.subject, added.singleOrNull()?.teacher))
+            }
             previous.copy(substitutions = emptyList()) != updated.copy(substitutions = emptyList()) ||
                 previous.substitutions.multiset() != updated.substitutions.multiset() ->
-                listOf(ChangeEvent.LessonUpdated(slot, updated.subject))
+                listOf(ChangeEvent.LessonUpdated(slot, updated.subject, previous.describeChanges(updated)))
             else -> emptyList()
         }
     }
@@ -103,7 +107,7 @@ fun detectAttendance(old: List<AttendanceSnapshot>, current: List<AttendanceEntr
         if (before[key].orEmpty().size > 1 || updated.status == AttendanceStatus.Present) return@flatMap emptyList()
         val previous = before[key]?.singleOrNull()
         if (previous?.status == updated.status) emptyList()
-        else listOf(ChangeEvent.AttendanceChanged(key, updated.subject, updated.status, previous == null))
+        else listOf(ChangeEvent.AttendanceChanged(key, updated.subject, updated.status, previous == null, updated.startTime))
     }
 }
 
@@ -116,7 +120,8 @@ fun detectTasks(old: List<TaskSnapshot>, current: List<SchoolTask>): List<Change
         val changed = previous == null || previous.date != updated.date || previous.subject != updated.subject ||
             previous.hasAttachment != updated.hasAttachment ||
             (previous.details != null && updated.details != null && previous.details != updated.details)
-        if (changed) listOf(ChangeEvent.TaskChanged(key, updated.date, updated.subject, previous == null))
+        if (changed) listOf(ChangeEvent.TaskChanged(key, updated.date, updated.subject, previous == null,
+            updated.details?.description))
         else emptyList()
     }
 }
@@ -147,3 +152,23 @@ fun detectPaymentSnapshots(old: PaymentsSnapshot, current: PaymentsSnapshot): Li
 }
 
 private fun <T> List<T>.multiset(): Map<T, Int> = groupingBy { it }.eachCount()
+
+private fun TimetableSnapshot.describeChanges(updated: TimetableSnapshot): String = buildList {
+    if (subject != updated.subject) add("Zmiana przedmiotu: ${updated.subject}")
+    if (teacher != updated.teacher) add("Zmiana prowadzącego" + updated.teacher?.let { ": $it" }.orEmpty())
+    if (supportingTeacher1 != updated.supportingTeacher1) {
+        add("Zmiana pierwszego nauczyciela wspomagającego" +
+            updated.supportingTeacher1?.let { ": $it" }.orEmpty())
+    }
+    if (supportingTeacher2 != updated.supportingTeacher2) {
+        add("Zmiana drugiego nauczyciela wspomagającego" +
+            updated.supportingTeacher2?.let { ": $it" }.orEmpty())
+    }
+    if (room != updated.room) add("Zmiana sali" + updated.room?.let { ": $it" }.orEmpty())
+    if (cancelled != updated.cancelled) add(if (updated.cancelled) "Lekcja odwołana" else "Odwołanie usunięte")
+    if (firstSupportingTeacherAbsent != updated.firstSupportingTeacherAbsent) {
+        add(if (updated.firstSupportingTeacherAbsent) "Nieobecny nauczyciel wspomagający pierwszy"
+            else "Usunięto informację o nieobecności nauczyciela wspomagającego")
+    }
+    if (substitutions.multiset() != updated.substitutions.multiset()) add("Zastępstwo usunięte")
+}.joinToString("; ")

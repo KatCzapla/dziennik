@@ -39,6 +39,20 @@ class UonetSchoolTasksRepositoryTest {
     }
 
     @Test
+    fun testFetchesExistingTestDetailsEndpoint() = runTest {
+        val activeStudentManager = ActiveStudentManager().apply { initialize(listOf(student)) }
+        val remote = FakeRemoteDataSource(tasks = listOf(schoolTaskDto(type = 1, id = 7)))
+
+        val tasks = UonetSchoolTasksRepository(activeStudentManager, remote).getSchoolTasks(
+            LocalDate.of(2026, 9, 14), LocalDate.of(2026, 9, 18),
+        )
+
+        assertEquals(SchoolTaskType.Test, tasks.single().type)
+        assertEquals(listOf(7), remote.testDetailRequests)
+        assertEquals("Quiz 7", tasks.single().details?.description)
+    }
+
+    @Test
     fun detailsAreMergedWithMatchingTaskOnly() = runTest {
         val activeStudentManager = ActiveStudentManager()
         activeStudentManager.initialize(listOf(student))

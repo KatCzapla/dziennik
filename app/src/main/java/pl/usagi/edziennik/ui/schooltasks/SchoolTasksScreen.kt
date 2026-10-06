@@ -418,6 +418,7 @@ private fun TypeStatus(type: SchoolTaskType) {
 @Composable
 private fun SchoolTaskType.containerColor(): Color =
     when (this) {
+        SchoolTaskType.Test -> MaterialTheme.colorScheme.secondaryContainer
         SchoolTaskType.Homework -> MaterialTheme.colorScheme.primaryContainer
         SchoolTaskType.Quiz -> MaterialTheme.colorScheme.secondaryContainer
         is SchoolTaskType.Unknown -> MaterialTheme.colorScheme.surfaceVariant
@@ -426,6 +427,7 @@ private fun SchoolTaskType.containerColor(): Color =
 @Composable
 private fun SchoolTaskType.contentColor(): Color =
     when (this) {
+        SchoolTaskType.Test -> MaterialTheme.colorScheme.onSecondaryContainer
         SchoolTaskType.Homework -> MaterialTheme.colorScheme.onPrimaryContainer
         SchoolTaskType.Quiz -> MaterialTheme.colorScheme.onSecondaryContainer
         is SchoolTaskType.Unknown -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -434,6 +436,7 @@ private fun SchoolTaskType.contentColor(): Color =
 @Composable
 private fun SchoolTaskType.accentColor(): Color =
     when (this) {
+        SchoolTaskType.Test -> MaterialTheme.colorScheme.secondary
         SchoolTaskType.Homework -> MaterialTheme.colorScheme.primary
         SchoolTaskType.Quiz -> MaterialTheme.colorScheme.secondary
         is SchoolTaskType.Unknown -> MaterialTheme.colorScheme.outline

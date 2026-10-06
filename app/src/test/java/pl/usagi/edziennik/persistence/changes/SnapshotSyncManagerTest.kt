@@ -177,6 +177,15 @@ class SnapshotSyncManagerTest {
         }
     }
 
+    @Test fun olderSnapshotsWithoutNotificationFieldsStillDecode() {
+        val oldMessage = json.encodeToString(MessageSnapshot(1, "Temat", day.atStartOfDay()))
+        val oldAttendance = json.encodeToString(AttendanceSnapshot(AttendanceKey(day, 7, 8), null,
+            AttendanceStatus.Absent))
+
+        assertEquals(null, json.decodeFromString<MessageSnapshot>(oldMessage).sender)
+        assertEquals(null, json.decodeFromString<AttendanceSnapshot>(oldAttendance).startTime)
+    }
+
     private fun manager() = SnapshotSyncManager(store, json, identity)
 
     private fun scope(area: SnapshotArea, range: String? = null): SnapshotScope {

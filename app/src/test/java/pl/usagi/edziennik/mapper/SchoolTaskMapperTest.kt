@@ -13,6 +13,14 @@ import java.time.LocalDate
 
 class SchoolTaskMapperTest {
     @Test
+    fun testTypeMapsToTest() {
+        val task = schoolTaskDto(type = 1).toDomain()
+
+        assertEquals(SchoolTaskType.Test, task.type)
+        assertEquals(1, task.rawType)
+    }
+
+    @Test
     fun homeworkTypeMapsToHomework() {
         val task = schoolTaskDto(type = 4).toDomain()
 

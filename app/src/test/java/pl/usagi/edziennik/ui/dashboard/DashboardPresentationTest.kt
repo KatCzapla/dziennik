@@ -437,6 +437,7 @@ class DashboardPresentationTest {
         SchoolTask(
             type = type,
             rawType = when (type) {
+                SchoolTaskType.Test -> 1
                 SchoolTaskType.Homework -> 4
                 SchoolTaskType.Quiz -> 2
                 is SchoolTaskType.Unknown -> type.rawValue

@@ -4,9 +4,10 @@ import pl.usagi.edziennik.domain.AttendanceStatus
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 
 sealed interface ChangeEvent {
-    data class NewMessage(val id: Int, val subject: String, val date: LocalDateTime) : ChangeEvent
+    data class NewMessage(val id: Int, val subject: String, val date: LocalDateTime, val sender: String? = null) : ChangeEvent
     data class NewGrade(
         val periodId: Int,
         val subjectPosition: Int,
@@ -27,16 +28,23 @@ sealed interface ChangeEvent {
     ) : ChangeEvent
 
     data class LessonCancelled(val slot: TimetableSlot, val subject: String) : ChangeEvent
-    data class LessonSubstituted(val slot: TimetableSlot, val subject: String) : ChangeEvent
-    data class LessonUpdated(val slot: TimetableSlot, val subject: String) : ChangeEvent
+    data class LessonSubstituted(val slot: TimetableSlot, val subject: String, val teacher: String? = null) : ChangeEvent
+    data class LessonUpdated(val slot: TimetableSlot, val subject: String, val details: String? = null) : ChangeEvent
     data class AttendanceChanged(
         val key: AttendanceKey,
         val subject: String?,
         val status: AttendanceStatus,
         val isNew: Boolean,
+        val startTime: LocalTime? = null,
     ) : ChangeEvent
 
-    data class TaskChanged(val key: TaskKey, val date: LocalDate, val subject: String?, val isNew: Boolean) : ChangeEvent
+    data class TaskChanged(
+        val key: TaskKey,
+        val date: LocalDate,
+        val subject: String?,
+        val isNew: Boolean,
+        val description: String? = null,
+    ) : ChangeEvent
     data class NewInformation(val date: LocalDate, val subject: String) : ChangeEvent
     data class PaymentChanged(val operationName: String?, val amountDue: BigDecimal?) : ChangeEvent
 }

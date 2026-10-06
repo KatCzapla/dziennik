@@ -10,7 +10,7 @@ import pl.usagi.edziennik.dto.TestDetailsDto
 
 fun SchoolTaskDto.toDomain(): SchoolTask =
     SchoolTask(
-        type = type.toSchoolTaskType(),
+        type = SchoolTaskType.fromRawValue(type),
         rawType = type,
         date = parseApiLocalDate(date),
         subject = subject.emptyToNull(),
@@ -36,15 +36,5 @@ fun TestDetailsDto.toDomainDetails(): SchoolTaskDetails =
         responseDeadline = null,
     )
 
-private fun Int.toSchoolTaskType(): SchoolTaskType =
-    when (this) {
-        HOMEWORK_TYPE -> SchoolTaskType.Homework
-        QUIZ_TYPE -> SchoolTaskType.Quiz
-        else -> SchoolTaskType.Unknown(this)
-    }
-
 private fun String?.emptyToNull(): String? =
     takeUnless { it.isNullOrBlank() }
-
-private const val QUIZ_TYPE = 2
-private const val HOMEWORK_TYPE = 4

@@ -54,7 +54,7 @@ class UonetSchoolTasksRepository @Inject constructor(
                 SchoolTaskType.Homework ->
                     dataSource.getHomeworkDetails(studentKey, task.id).toDomainDetails()
 
-                SchoolTaskType.Quiz ->
+                SchoolTaskType.Test, SchoolTaskType.Quiz ->
                     dataSource.getTestDetails(studentKey, task.id).toDomainDetails()
 
                 is SchoolTaskType.Unknown -> null

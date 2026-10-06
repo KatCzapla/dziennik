@@ -24,10 +24,10 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 
 @Serializable
-data class MessageSnapshot(val id: Int, val subject: String, val date: LocalDateTime)
+data class MessageSnapshot(val id: Int, val subject: String, val date: LocalDateTime, val sender: String? = null)
 
 fun List<ReceivedMessage>.messageSnapshots(): List<MessageSnapshot> =
-    map { MessageSnapshot(it.id, it.subject, it.date) }
+    map { MessageSnapshot(it.id, it.subject, it.date, it.sender) }
 
 @Serializable
 data class GradeFingerprint(
@@ -124,12 +124,14 @@ data class AttendanceSnapshot(
     val key: AttendanceKey,
     val subject: String?,
     @Serializable(with = AttendanceStatusSerializer::class) val status: AttendanceStatus,
+    val startTime: LocalTime? = null,
 )
 
 fun List<AttendanceEntry>.attendanceSnapshots(): List<AttendanceSnapshot> = map { entry ->
     AttendanceSnapshot(
         key = AttendanceKey(entry.date, entry.lessonTimeId, entry.classLessonId),
         subject = entry.subject,
+        startTime = entry.startTime,
         status = when (val status = entry.status) {
             is AttendanceStatus.Unknown -> AttendanceStatus.Unknown(status.rawValue)
             else -> status
