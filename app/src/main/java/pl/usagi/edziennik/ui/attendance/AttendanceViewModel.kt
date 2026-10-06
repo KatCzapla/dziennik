@@ -19,7 +19,9 @@ import pl.usagi.edziennik.domain.time.clampedSchoolWeekStart
 import pl.usagi.edziennik.domain.time.coerceInSchoolYear
 import pl.usagi.edziennik.domain.time.currentSchoolYearRange
 import pl.usagi.edziennik.domain.time.isSelectableSchoolDate
+import pl.usagi.edziennik.domain.time.lastSelectableSchoolDate
 import pl.usagi.edziennik.repository.AttendanceRepository
+import pl.usagi.edziennik.repository.AttendanceExcuseRequest
 import pl.usagi.edziennik.ui.timetable.nextSchoolDate
 import pl.usagi.edziennik.ui.timetable.previousSchoolDate
 import java.time.Clock
@@ -33,7 +35,7 @@ class AttendanceViewModel @Inject constructor(
     private val clock: Clock,
 ) : ViewModel() {
     private val schoolYearRange = currentSchoolYearRange(LocalDate.now(clock))
-    private val latestSelectableDate = LocalDate.now(clock).latestAttendanceSelectableDate()
+    private val latestSelectableDate = lastSelectableSchoolDate(schoolYearRange)
     private val _uiState = MutableStateFlow(
         AttendanceUiState(
             schoolYearRange = schoolYearRange,
@@ -81,14 +83,12 @@ class AttendanceViewModel @Inject constructor(
 
     fun selectDate(date: LocalDate) {
         if (!date.isSelectableSchoolDate(schoolYearRange)) return
-        if (WeekRange.fromDate(date).start.isAfter(WeekRange.fromDate(latestSelectableDate).start)) return
-
         val previousWeek = _uiState.value.displayedWeek
         _uiState.update { state ->
             state.copy(
                 selectedDate = date,
-                excuseFormDate = if (state.isSubmittingExcuse) state.excuseFormDate else null,
-                selectedExcuseOption = if (state.isSubmittingExcuse) state.selectedExcuseOption else null,
+                excuseFormWeek = if (state.isSubmittingExcuse) state.excuseFormWeek else null,
+                selectedExcuseOptions = if (state.isSubmittingExcuse) state.selectedExcuseOptions else emptySet(),
             )
         }
         if (WeekRange.fromDate(date) != previousWeek) {
@@ -126,25 +126,34 @@ class AttendanceViewModel @Inject constructor(
         activeStudentManager.setActiveStudent(student)
     }
 
-    fun openExcuseForSelectedDay() {
+    fun openExcuseForDisplayedWeek() {
         val state = _uiState.value
         if (state.availableExcuseOptions.isEmpty() || state.isSubmittingExcuse) return
         _uiState.update {
             it.copy(
-                excuseFormDate = state.selectedDate,
-                selectedExcuseOption = null,
+                excuseFormWeek = state.displayedWeek,
+                selectedExcuseOptions = emptySet(),
                 excuseContent = "",
                 excuseErrorMessage = null,
             )
         }
     }
 
-    fun selectExcuseOption(option: ExcuseOption) {
+    fun toggleExcuseOption(option: ExcuseOption) {
         val state = _uiState.value
-        if (state.isSubmittingExcuse || state.excuseFormDate != state.selectedDate ||
+        if (state.isSubmittingExcuse || state.excuseFormWeek != state.displayedWeek ||
             option !in state.availableExcuseOptions
         ) return
-        _uiState.update { it.copy(selectedExcuseOption = option, excuseErrorMessage = null) }
+        _uiState.update {
+            val otherDays = it.selectedExcuseOptions.filterNot { selected -> selected.date == option.date }
+            val sameDay = it.selectedExcuseOptions.filter { selected -> selected.date == option.date }
+            val selection = when {
+                option in sameDay -> otherDays + sameDay.filterNot { selected -> selected == option }
+                option is ExcuseOption.WholeDay -> otherDays + option
+                else -> otherDays + sameDay.filterIsInstance<ExcuseOption.Lesson>() + option
+            }
+            it.copy(selectedExcuseOptions = selection.toSet(), excuseErrorMessage = null)
+        }
     }
 
     fun changeExcuseContent(content: String) {
@@ -155,32 +164,43 @@ class AttendanceViewModel @Inject constructor(
     fun dismissExcuse() {
         if (_uiState.value.isSubmittingExcuse) return
         _uiState.update {
-            it.copy(excuseFormDate = null, selectedExcuseOption = null, excuseErrorMessage = null)
+            it.copy(excuseFormWeek = null, selectedExcuseOptions = emptySet(), excuseErrorMessage = null)
         }
     }
 
     fun submitExcuse() {
         val state = _uiState.value
-        val option = state.selectedExcuseOption ?: return
+        val options = state.selectedExcuseOptions.takeIf { it.isNotEmpty() } ?: return
         val student = state.activeStudent ?: return
-        if (state.isSubmittingExcuse || state.excuseFormDate != state.selectedDate ||
-            option !in state.availableExcuseOptions
+        if (state.isSubmittingExcuse || state.excuseFormWeek != state.displayedWeek ||
+            !state.availableExcuseOptions.containsAll(options)
         ) return
         _uiState.update { it.copy(isSubmittingExcuse = true, excuseErrorMessage = null) }
         viewModelScope.launch {
             try {
-                attendanceRepository.submitExcuse(option.date, option.lessonTimeId, state.excuseContent)
+                attendanceRepository.submitExcuses(
+                    options.sortedWith(compareBy<ExcuseOption> { it.date }.thenBy { it.lessonTimeId ?: -1 })
+                        .map { AttendanceExcuseRequest(it.date, it.lessonTimeId) },
+                    state.excuseContent,
+                )
+                if (activeStudentManager.activeStudent.value != student) return@launch
+                _uiState.update {
+                    it.copy(
+                        submittedExcuseKeys = it.submittedExcuseKeys + options.map { selected ->
+                            selected.date to selected.lessonTimeId
+                        },
+                    )
+                }
+                loadAttendance(force = true)?.join()
                 if (activeStudentManager.activeStudent.value != student) return@launch
                 _uiState.update {
                     it.copy(
                         isSubmittingExcuse = false,
-                        excuseFormDate = null,
-                        selectedExcuseOption = null,
+                        excuseFormWeek = null,
+                        selectedExcuseOptions = emptySet(),
                         excuseContent = "",
-                        submittedExcuseKeys = it.submittedExcuseKeys + (option.date to option.lessonTimeId),
                     )
                 }
-                loadAttendance(force = true)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -222,8 +242,8 @@ class AttendanceViewModel @Inject constructor(
                         excusesActive = null,
                         excusesComplete = false,
                         submittedExcuseKeys = emptySet(),
-                        excuseFormDate = null,
-                        selectedExcuseOption = null,
+                        excuseFormWeek = null,
+                        selectedExcuseOptions = emptySet(),
                         excuseContent = "",
                         isSubmittingExcuse = false,
                         excuseErrorMessage = null,
@@ -293,7 +313,7 @@ class AttendanceViewModel @Inject constructor(
         }
     }
 
-    private fun loadAttendance(force: Boolean = false) {
+    private fun loadAttendance(force: Boolean = false): Job? {
         val student = _uiState.value.activeStudent
         if (student == null) {
             attendanceJob?.cancel()
@@ -307,11 +327,11 @@ class AttendanceViewModel @Inject constructor(
                     errorMessage = "Wybierz ucznia, aby zobaczyć frekwencję.",
                 )
             }
-            return
+            return null
         }
 
         val week = _uiState.value.displayedWeek
-        if (!force && loadedWeek == week && attendanceJob?.isActive != true) return
+        if (!force && loadedWeek == week && attendanceJob?.isActive != true) return attendanceJob
         attendanceJob?.cancel()
         val requestId = ++attendanceLoadId
         attendanceJob = viewModelScope.launch {
@@ -358,13 +378,11 @@ class AttendanceViewModel @Inject constructor(
                 loadedWeek = null
             }
         }
+        return attendanceJob
     }
 
     private fun LocalDate.attendanceDateWithinLimits(): LocalDate =
         initialAttendanceDate(this, schoolYearRange)
             .coerceInSchoolYear(schoolYearRange)
 
-    private fun LocalDate.latestAttendanceSelectableDate(): LocalDate =
-        WeekRange.fromDate(this).start.plusDays(4)
-            .coerceInSchoolYear(schoolYearRange)
 }

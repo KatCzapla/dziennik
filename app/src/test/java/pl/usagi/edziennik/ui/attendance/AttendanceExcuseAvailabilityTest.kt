@@ -1,5 +1,6 @@
 package pl.usagi.edziennik.ui.attendance
 
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -7,6 +8,7 @@ import org.junit.Test
 import pl.usagi.edziennik.domain.AttendanceEntry
 import pl.usagi.edziennik.domain.AttendanceExcuseStatus
 import pl.usagi.edziennik.domain.AttendanceStatus
+import pl.usagi.edziennik.dto.AttendanceExcusesResponseDto
 import java.time.LocalDate
 import java.time.LocalTime
 
@@ -25,7 +27,7 @@ class AttendanceExcuseAvailabilityTest {
 
     private fun state(item: AttendanceEntry = entry) = AttendanceUiState(
         selectedDate = item.date,
-        today = item.date,
+        today = LocalDate.of(2026, 9, 18),
         weekEntries = listOf(item), excusesActive = true, excusesComplete = true,
     )
 
@@ -67,6 +69,31 @@ class AttendanceExcuseAvailabilityTest {
         assertFalse(state().copy(excusesActive = false).showHeaderExcuseButton)
     }
 
+    @Test fun headerUsesDisplayedWeekNotSelectedDay() {
+        val friday = LocalDate.of(2026, 9, 18)
+        val data = state().copy(selectedDate = friday)
+
+        assertTrue(data.selectedDayEntries.isEmpty())
+        assertTrue(ExcuseOption.Lesson(entry) in data.availableExcuseOptions)
+        assertTrue(data.showHeaderExcuseButton)
+    }
+
+    @Test fun visibleDaysSkipDaysWithoutAvailableOptions() {
+        val present = entry.copy(date = entry.date.plusDays(1), status = AttendanceStatus.Present)
+        val data = state().copy(weekEntries = listOf(entry, present))
+
+        assertEquals(listOf(entry.date), visibleExcuseDays(data).map { it.first })
+        assertEquals(listOf(ExcuseOption.WholeDay(entry.date), ExcuseOption.Lesson(entry)),
+            visibleExcuseDays(data).single().second)
+    }
+
+    @Test fun visibleDaysAreEmptyWhenWeekHasNoOptions() {
+        val data = state(entry.copy(status = AttendanceStatus.Present))
+
+        assertTrue(visibleExcuseDays(data).isEmpty())
+        assertFalse(data.canSubmitSelectedExcuses)
+    }
+
     @Test fun optionsContainOnlyEligibleLessons() {
         val late = entry.copy(lessonTimeId = 2, status = AttendanceStatus.Late, subject = "Polski")
         val present = entry.copy(lessonTimeId = 3, status = AttendanceStatus.Present)
@@ -91,10 +118,61 @@ class AttendanceExcuseAvailabilityTest {
         val future = entry.date.plusDays(1)
         val data = state().copy(today = entry.date, selectedDate = future, weekEntries = emptyList())
 
-        assertEquals(listOf(ExcuseOption.WholeDay(future)), data.availableExcuseOptions)
+        assertTrue(ExcuseOption.WholeDay(future) in data.availableExcuseOptions)
         assertTrue(data.showHeaderExcuseButton)
         assertFalse(data.copy(excusesActive = false).showHeaderExcuseButton)
-        assertFalse(data.copy(submittedExcuseKeys = setOf(future to null)).showHeaderExcuseButton)
+        assertFalse(ExcuseOption.WholeDay(future) in
+            data.copy(submittedExcuseKeys = setOf(future to null)).availableExcuseOptions)
+    }
+
+    @Test fun futureWeekdaysCanOfferWholeDay() {
+        val monday = LocalDate.of(2026, 9, 21)
+        (0L..4L).forEach { offset ->
+            val date = monday.plusDays(offset)
+            val data = state().copy(today = entry.date, selectedDate = date, weekEntries = emptyList())
+
+            assertTrue(ExcuseOption.WholeDay(date) in data.availableExcuseOptions)
+            assertTrue(data.showHeaderExcuseButton)
+        }
+    }
+
+    @Test fun saturdayDoesNotOfferWholeDayOrHeaderWithoutLesson() {
+        val saturday = LocalDate.of(2026, 9, 19)
+        val data = state().copy(selectedDate = saturday, weekEntries = emptyList())
+
+        assertTrue(data.availableExcuseOptions.isEmpty())
+        assertFalse(data.showHeaderExcuseButton)
+    }
+
+    @Test fun sundayDoesNotOfferWholeDayOrHeaderWithoutLesson() {
+        val sunday = LocalDate.of(2026, 9, 20)
+        val data = state().copy(selectedDate = sunday, weekEntries = emptyList())
+
+        assertTrue(data.availableExcuseOptions.isEmpty())
+        assertFalse(data.showHeaderExcuseButton)
+    }
+
+    @Test fun eligibleWeekendLessonRemainsAvailable() {
+        val saturdayEntry = entry.copy(date = LocalDate.of(2026, 9, 19))
+        val data = state(saturdayEntry)
+
+        assertEquals(listOf(ExcuseOption.Lesson(saturdayEntry)), data.availableExcuseOptions)
+        assertTrue(data.showHeaderExcuseButton)
+    }
+
+    @Test fun parentReportingFlagDoesNotAffectExistingExcuses() {
+        val response = Json { ignoreUnknownKeys = true }.decodeFromString<AttendanceExcusesResponseDto>(
+            """{"usprawiedliwieniaAktywne":true,"rodzicMozeZglaszac":false,"usprawiedliwienia":[]}"""
+        )
+        val monday = LocalDate.of(2026, 9, 21)
+        val data = state().copy(
+            today = entry.date,
+            selectedDate = monday,
+            weekEntries = emptyList(),
+            excusesActive = response.active,
+        )
+
+        assertTrue(ExcuseOption.WholeDay(monday) in data.availableExcuseOptions)
     }
 
     @Test fun pastDayWithoutEntriesHasNoWholeDayOption() {

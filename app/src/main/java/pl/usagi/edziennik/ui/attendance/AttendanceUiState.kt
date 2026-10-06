@@ -9,6 +9,7 @@ import pl.usagi.edziennik.domain.time.SchoolYearRange
 import pl.usagi.edziennik.domain.time.WeekRange
 import pl.usagi.edziennik.domain.time.currentSchoolYearRange
 import pl.usagi.edziennik.domain.time.intersectsSchoolYear
+import pl.usagi.edziennik.domain.time.isSelectableSchoolDate
 import java.time.LocalDate
 
 enum class AttendanceView { ENTRIES, STATISTICS }
@@ -40,8 +41,8 @@ data class AttendanceUiState(
     val excusesActive: Boolean? = null,
     val excusesComplete: Boolean = false,
     val submittedExcuseKeys: Set<Pair<LocalDate, Int?>> = emptySet(),
-    val excuseFormDate: LocalDate? = null,
-    val selectedExcuseOption: ExcuseOption? = null,
+    val excuseFormWeek: WeekRange? = null,
+    val selectedExcuseOptions: Set<ExcuseOption> = emptySet(),
     val excuseContent: String = "",
     val isSubmittingExcuse: Boolean = false,
     val excuseErrorMessage: String? = null,
@@ -61,15 +62,23 @@ data class AttendanceUiState(
     val availableExcuseOptions: List<ExcuseOption>
         get() {
             if (excusesActive != true || !excusesComplete || isLoading || errorMessage != null) return emptyList()
-            val lessons = selectedDayEntries.filter(::canSubmitExcuse).map(ExcuseOption::Lesson)
-            val wholeDayAvailable = submittedExcuseKeys.none { it.first == selectedDate } &&
-                selectedDayEntries.all { it.excuseStatus == null && it.status in EXCUSABLE_STATUSES } &&
-                (selectedDate.isAfter(today) || lessons.isNotEmpty())
-            return if (wholeDayAvailable) lessons + ExcuseOption.WholeDay(selectedDate) else lessons
+            return (0L..6L).flatMap { offset ->
+                val date = displayedWeek.start.plusDays(offset)
+                val entries = weekEntries.filter { it.date == date }
+                val lessons = entries.filter(::canSubmitExcuse).map(ExcuseOption::Lesson)
+                val wholeDayAvailable = date.isSelectableSchoolDate(schoolYearRange) &&
+                    submittedExcuseKeys.none { it.first == date } &&
+                    entries.all { it.excuseStatus == null && it.status in EXCUSABLE_STATUSES } &&
+                    (date.isAfter(today) || lessons.isNotEmpty())
+                if (wholeDayAvailable) listOf(ExcuseOption.WholeDay(date)) + lessons else lessons
+            }
         }
 
     val showHeaderExcuseButton: Boolean
         get() = view == AttendanceView.ENTRIES && availableExcuseOptions.isNotEmpty()
+
+    val canSubmitSelectedExcuses: Boolean
+        get() = selectedExcuseOptions.isNotEmpty() && !isSubmittingExcuse
 
     fun canSubmitExcuse(entry: AttendanceEntry): Boolean {
         val lessonTimeId = entry.lessonTimeId ?: return false
@@ -90,9 +99,7 @@ data class AttendanceUiState(
     val canGoNextWeek: Boolean
         get() {
             val targetWeek = displayedWeek.next()
-            val latestWeek = WeekRange.fromDate(latestSelectableDate)
-            return targetWeek.intersectsSchoolYear(schoolYearRange) &&
-                !targetWeek.start.isAfter(latestWeek.start)
+            return targetWeek.intersectsSchoolYear(schoolYearRange)
         }
 
     private companion object {

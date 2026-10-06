@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,16 +19,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,7 +32,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -81,6 +75,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun AttendanceRoute(
     onBack: () -> Unit,
+    onOpenExcuse: () -> Unit,
     viewModel: AttendanceViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -96,11 +91,10 @@ fun AttendanceRoute(
         onStudentSelected = viewModel::selectStudent,
         onViewSelected = viewModel::selectView,
         onSubjectSelected = viewModel::selectSubject,
-        onOpenExcuse = viewModel::openExcuseForSelectedDay,
-        onSelectExcuseOption = viewModel::selectExcuseOption,
-        onExcuseContentChanged = viewModel::changeExcuseContent,
-        onSubmitExcuse = viewModel::submitExcuse,
-        onDismissExcuse = viewModel::dismissExcuse,
+        onOpenExcuse = {
+            viewModel.openExcuseForDisplayedWeek()
+            if (viewModel.uiState.value.excuseFormWeek != null) onOpenExcuse()
+        },
     )
 }
 
@@ -117,10 +111,6 @@ private fun AttendanceScreen(
     onViewSelected: (AttendanceView) -> Unit,
     onSubjectSelected: (Int) -> Unit,
     onOpenExcuse: () -> Unit,
-    onSelectExcuseOption: (ExcuseOption) -> Unit,
-    onExcuseContentChanged: (String) -> Unit,
-    onSubmitExcuse: () -> Unit,
-    onDismissExcuse: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
     val firstPagerDate = remember(state.schoolYearRange) {
@@ -276,87 +266,6 @@ private fun AttendanceScreen(
         }
     }
 
-    if (state.excuseFormDate != null) {
-        AlertDialog(
-            onDismissRequest = onDismissExcuse,
-            title = { Text("Usprawiedliw ${state.excuseFormDate.dayMonthLabel()}") },
-            text = {
-                Column(
-                    modifier = Modifier.heightIn(max = 430.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(spacing.sm),
-                ) {
-                    state.availableExcuseOptions.forEach { option ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clickable(
-                                enabled = !state.isSubmittingExcuse,
-                                onClick = { onSelectExcuseOption(option) },
-                            ),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(
-                                selected = state.selectedExcuseOption == option,
-                                onClick = { onSelectExcuseOption(option) },
-                                enabled = !state.isSubmittingExcuse,
-                            )
-                            Column {
-                                when (option) {
-                                    is ExcuseOption.Lesson -> {
-                                        Text(
-                                            "${option.entry.startTime.format(timeFormatter)}–" +
-                                                "${option.entry.endTime.format(timeFormatter)} · " +
-                                                (option.entry.subject ?: "Zajęcia"),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                        )
-                                        Text(
-                                            option.entry.status.label(),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    is ExcuseOption.WholeDay -> Text(
-                                        "Cały dzień",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    OutlinedTextField(
-                        value = state.excuseContent,
-                        onValueChange = onExcuseContentChanged,
-                        enabled = !state.isSubmittingExcuse,
-                        label = { Text("Uzasadnienie (opcjonalne)") },
-                        supportingText = {
-                            Text("${state.excuseContent.codePointCount(0, state.excuseContent.length)}/256")
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 3,
-                        maxLines = 5,
-                    )
-                    state.excuseErrorMessage?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = onSubmitExcuse,
-                    enabled = !state.isSubmittingExcuse && state.selectedExcuseOption != null,
-                ) {
-                    if (state.isSubmittingExcuse) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(spacing.xs))
-                    }
-                    Text("Wyślij")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissExcuse, enabled = !state.isSubmittingExcuse) {
-                    Text("Anuluj")
-                }
-            },
-        )
-    }
 }
 
 @Composable

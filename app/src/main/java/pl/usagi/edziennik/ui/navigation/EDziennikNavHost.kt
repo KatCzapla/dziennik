@@ -10,6 +10,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import pl.usagi.edziennik.ui.attendance.AttendanceRoute
+import pl.usagi.edziennik.ui.attendance.AttendanceExcuseRoute
+import pl.usagi.edziennik.ui.attendance.AttendanceViewModel
 import pl.usagi.edziennik.ui.grades.GradesRoute
 import pl.usagi.edziennik.ui.grades.GradesSubjectRoute
 import pl.usagi.edziennik.ui.grades.GradesViewModel
@@ -73,6 +75,17 @@ fun EDziennikNavHost(
                 onBack = {
                     navController.popBackStack()
                 },
+                onOpenExcuse = { navController.navigate("attendance/excuse") },
+            )
+        }
+        composable("attendance/excuse") { backStackEntry ->
+            val parentEntry = remember(backStackEntry) {
+                navController.getBackStackEntry("attendance")
+            }
+            val viewModel: AttendanceViewModel = hiltViewModel(parentEntry)
+            AttendanceExcuseRoute(
+                onBack = { navController.popBackStack() },
+                viewModel = viewModel,
             )
         }
         composable(

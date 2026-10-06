@@ -115,6 +115,36 @@ class UonetAttendanceRepositoryTest {
     }
 
     @Test
+    fun submitMultipleLessonsUsesOnePost() = runTest {
+        val requests = mutableListOf<Request>()
+        repository(requests = requests).submitExcuses(
+            listOf(
+                AttendanceExcuseRequest(LocalDate.of(2026, 9, 15), 1568),
+                AttendanceExcuseRequest(LocalDate.of(2026, 9, 16), 1600),
+            ),
+            "Wspólny powód",
+        )
+
+        assertEquals(1, requests.size)
+        val body = Json.parseToJsonElement(
+            okio.Buffer().also { requests.single().body!!.writeTo(it) }.readUtf8(),
+        ).jsonObject
+        assertEquals("Wspólny powód", body.getValue("tresc").jsonPrimitive.content)
+        assertEquals(
+            listOf("1568", "1600"),
+            body.getValue("usprawiedliwienia").jsonArray.map {
+                it.jsonObject.getValue("idPoraLekcji").jsonPrimitive.content
+            },
+        )
+        assertEquals(
+            listOf("2026-09-15T00:00:00+02:00", "2026-09-16T00:00:00+02:00"),
+            body.getValue("usprawiedliwienia").jsonArray.map {
+                it.jsonObject.getValue("dzien").jsonPrimitive.content
+            },
+        )
+    }
+
+    @Test
     fun submitAllowsEmptyAndExactly256Characters() = runTest {
         val requests = mutableListOf<Request>()
         val repository = repository(requests = requests)

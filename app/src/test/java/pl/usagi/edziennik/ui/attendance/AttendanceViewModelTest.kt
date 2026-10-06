@@ -22,6 +22,7 @@ import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.time.WeekRange
 import pl.usagi.edziennik.repository.AttendanceRepository
 import pl.usagi.edziennik.repository.AttendanceFetchResult
+import pl.usagi.edziennik.repository.AttendanceExcuseRequest
 import java.io.IOException
 import java.time.Clock
 import java.time.LocalDate
@@ -45,8 +46,8 @@ class AttendanceViewModelTest {
         advanceUntilIdle()
         val entry = viewModel.uiState.value.weekEntries.single()
 
-        viewModel.openExcuseForSelectedDay()
-        viewModel.selectExcuseOption(ExcuseOption.Lesson(entry))
+        viewModel.openExcuseForDisplayedWeek()
+        viewModel.toggleExcuseOption(ExcuseOption.Lesson(entry))
         viewModel.changeExcuseContent("Proszę usprawiedliwić")
         viewModel.submitExcuse()
         runCurrent()
@@ -60,7 +61,7 @@ class AttendanceViewModelTest {
 
         assertEquals(2, repository.fetchCalls)
         assertEquals(AttendanceExcuseStatus.Pending, viewModel.uiState.value.weekEntries.single().excuseStatus)
-        assertEquals(null, viewModel.uiState.value.excuseFormDate)
+        assertEquals(null, viewModel.uiState.value.excuseFormWeek)
         assertFalse(viewModel.uiState.value.canSubmitExcuse(viewModel.uiState.value.weekEntries.single()))
     }
 
@@ -71,8 +72,8 @@ class AttendanceViewModelTest {
         val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
         manager.initialize(listOf(firstStudent))
         advanceUntilIdle()
-        viewModel.openExcuseForSelectedDay()
-        viewModel.selectExcuseOption(ExcuseOption.Lesson(viewModel.uiState.value.weekEntries.single()))
+        viewModel.openExcuseForDisplayedWeek()
+        viewModel.toggleExcuseOption(ExcuseOption.Lesson(viewModel.uiState.value.weekEntries.single()))
         viewModel.changeExcuseContent("Powód")
         viewModel.submitExcuse()
         runCurrent()
@@ -81,7 +82,7 @@ class AttendanceViewModelTest {
 
         assertEquals(1, repository.fetchCalls)
         assertEquals("Powód", viewModel.uiState.value.excuseContent)
-        assertTrue(viewModel.uiState.value.selectedExcuseOption is ExcuseOption.Lesson)
+        assertTrue(viewModel.uiState.value.selectedExcuseOptions.single() is ExcuseOption.Lesson)
         assertTrue(viewModel.uiState.value.excuseErrorMessage!!.contains("Nie udało się"))
         assertFalse(viewModel.uiState.value.isSubmittingExcuse)
     }
@@ -93,7 +94,7 @@ class AttendanceViewModelTest {
         val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
         manager.initialize(listOf(firstStudent))
         advanceUntilIdle()
-        viewModel.openExcuseForSelectedDay()
+        viewModel.openExcuseForDisplayedWeek()
         assertEquals("", viewModel.uiState.value.excuseContent)
         viewModel.changeExcuseContent("a".repeat(256))
         assertEquals(256, viewModel.uiState.value.excuseContent.length)
@@ -109,32 +110,135 @@ class AttendanceViewModelTest {
         manager.initialize(listOf(firstStudent))
         advanceUntilIdle()
         viewModel.selectDate(LocalDate.of(2026, 9, 16))
-        viewModel.openExcuseForSelectedDay()
+        viewModel.openExcuseForDisplayedWeek()
         val option = ExcuseOption.WholeDay(LocalDate.of(2026, 9, 16))
-        viewModel.selectExcuseOption(option)
+        viewModel.toggleExcuseOption(option)
         viewModel.submitExcuse()
         advanceUntilIdle()
 
         assertEquals(option.date to null, repository.submitted)
         assertEquals(2, repository.fetchCalls)
-        assertFalse(viewModel.uiState.value.showHeaderExcuseButton)
+        assertFalse(option in viewModel.uiState.value.availableExcuseOptions)
     }
 
     @Test
-    fun formKeepsOnlyOneSelectedOption() = runTest {
+    fun wholeDayAndLessonExcludeEachOther() = runTest {
         val repository = ExcuseRepository()
         val manager = ActiveStudentManager()
         val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
         manager.initialize(listOf(firstStudent))
         advanceUntilIdle()
 
-        viewModel.openExcuseForSelectedDay()
+        viewModel.openExcuseForDisplayedWeek()
         val lesson = ExcuseOption.Lesson(viewModel.uiState.value.weekEntries.single())
         val wholeDay = ExcuseOption.WholeDay(LocalDate.of(2026, 9, 15))
-        viewModel.selectExcuseOption(lesson)
-        viewModel.selectExcuseOption(wholeDay)
+        viewModel.toggleExcuseOption(lesson)
+        viewModel.toggleExcuseOption(wholeDay)
 
-        assertEquals(wholeDay, viewModel.uiState.value.selectedExcuseOption)
+        assertEquals(setOf(wholeDay), viewModel.uiState.value.selectedExcuseOptions)
+        viewModel.toggleExcuseOption(lesson)
+        assertEquals(setOf(lesson), viewModel.uiState.value.selectedExcuseOptions)
+    }
+
+    @Test
+    fun formUsesDisplayedWeekAndSubmitRequiresSelection() = runTest {
+        val repository = MultiExcuseRepository(emptyList())
+        val manager = ActiveStudentManager()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        viewModel.selectDate(LocalDate.of(2026, 9, 16))
+        viewModel.openExcuseForDisplayedWeek()
+
+        assertEquals(WeekRange.fromDate(LocalDate.of(2026, 9, 16)), viewModel.uiState.value.excuseFormWeek)
+        assertFalse(viewModel.uiState.value.canSubmitSelectedExcuses)
+        viewModel.submitExcuse()
+        advanceUntilIdle()
+        assertTrue(repository.submissions.isEmpty())
+    }
+
+    @Test
+    fun futureWeekOpensExcuseFormForThatWeek() = runTest {
+        val repository = MultiExcuseRepository(emptyList())
+        val manager = ActiveStudentManager()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(LocalDate.of(2026, 9, 15)))
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        viewModel.nextWeek()
+        advanceUntilIdle()
+        viewModel.openExcuseForDisplayedWeek()
+
+        val expectedWeek = WeekRange.fromDate(LocalDate.of(2026, 9, 22))
+        assertEquals(expectedWeek, viewModel.uiState.value.displayedWeek)
+        assertEquals(expectedWeek, viewModel.uiState.value.excuseFormWeek)
+        assertEquals(LocalDate.of(2026, 9, 21) to LocalDate.of(2026, 9, 25),
+            repository.requests.last())
+    }
+
+    @Test
+    fun twoLessonsFromSameDayAreSubmittedTogether() = runTest {
+        val first = attendanceEntry().copy(date = LocalDate.of(2026, 9, 15), status = AttendanceStatus.Absent)
+        val second = first.copy(lessonTimeId = 11, status = AttendanceStatus.Late)
+        val repository = MultiExcuseRepository(listOf(first, second))
+        val manager = ActiveStudentManager()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(first.date))
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        viewModel.openExcuseForDisplayedWeek()
+        viewModel.toggleExcuseOption(ExcuseOption.Lesson(first))
+        viewModel.toggleExcuseOption(ExcuseOption.Lesson(second))
+        assertEquals(2, viewModel.uiState.value.selectedExcuseOptions.size)
+        assertTrue(viewModel.uiState.value.canSubmitSelectedExcuses)
+
+        viewModel.submitExcuse()
+        advanceUntilIdle()
+
+        assertEquals(1, repository.submissions.size)
+        assertEquals(
+            listOf(AttendanceExcuseRequest(first.date, 10), AttendanceExcuseRequest(first.date, 11)),
+            repository.submissions.single(),
+        )
+        assertEquals(2, repository.fetchCalls)
+        assertEquals(null, viewModel.uiState.value.excuseFormWeek)
+    }
+
+    @Test
+    fun lessonsFromDifferentDaysOfDisplayedWeekCanBeSelected() = runTest {
+        val tuesday = attendanceEntry().copy(date = LocalDate.of(2026, 9, 15), status = AttendanceStatus.Absent)
+        val thursday = tuesday.copy(date = LocalDate.of(2026, 9, 17), lessonTimeId = 12)
+        val repository = MultiExcuseRepository(listOf(tuesday, thursday))
+        val manager = ActiveStudentManager()
+        val viewModel = AttendanceViewModel(repository, manager, fixedClock(tuesday.date))
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        viewModel.openExcuseForDisplayedWeek()
+        viewModel.toggleExcuseOption(ExcuseOption.Lesson(tuesday))
+        viewModel.toggleExcuseOption(ExcuseOption.Lesson(thursday))
+
+        assertEquals(setOf(tuesday.date, thursday.date),
+            viewModel.uiState.value.selectedExcuseOptions.map { it.date }.toSet())
+        viewModel.submitExcuse()
+        advanceUntilIdle()
+        assertEquals(1, repository.submissions.size)
+        assertEquals(setOf(tuesday.date, thursday.date), repository.submissions.single().map { it.date }.toSet())
+    }
+
+    private class MultiExcuseRepository(private val entries: List<AttendanceEntry>) : AttendanceRepository {
+        var fetchCalls = 0
+        val requests = mutableListOf<Pair<LocalDate, LocalDate>>()
+        val submissions = mutableListOf<List<AttendanceExcuseRequest>>()
+
+        override suspend fun getAttendance(from: LocalDate, to: LocalDate): List<AttendanceEntry> = entries
+        override suspend fun getAttendanceWithCompleteness(from: LocalDate, to: LocalDate): AttendanceFetchResult {
+            fetchCalls++
+            requests += from to to
+            return AttendanceFetchResult(entries, excusesComplete = true, excusesActive = true)
+        }
+        override suspend fun submitExcuses(items: List<AttendanceExcuseRequest>, content: String) {
+            submissions += items
+        }
+        override suspend fun getSubjects(): List<AttendanceSubject> = emptyList()
+        override suspend fun getStatistics(subjectId: Int): AttendanceStatistics = AttendanceStatistics(null, emptyList())
     }
 
     private class WholeDayRepository : AttendanceRepository {
@@ -146,8 +250,8 @@ class AttendanceViewModelTest {
             fetchCalls++
             return AttendanceFetchResult(emptyList(), excusesComplete = true, excusesActive = true)
         }
-        override suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int?, content: String) {
-            submitted = date to lessonTimeId
+        override suspend fun submitExcuses(items: List<AttendanceExcuseRequest>, content: String) {
+            submitted = items.single().let { it.date to it.lessonTimeId }
         }
         override suspend fun getSubjects(): List<AttendanceSubject> = emptyList()
         override suspend fun getStatistics(subjectId: Int): AttendanceStatistics = AttendanceStatistics(null, emptyList())
@@ -166,10 +270,9 @@ class AttendanceViewModelTest {
             return AttendanceFetchResult(listOf(entry), excusesComplete = true, excusesActive = true)
         }
 
-        override suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int?, content: String) {
+        override suspend fun submitExcuses(items: List<AttendanceExcuseRequest>, content: String) {
             submitCalls++
-            assertEquals(entry.date, date)
-            assertEquals(entry.lessonTimeId, lessonTimeId)
+            assertEquals(listOf(AttendanceExcuseRequest(entry.date, entry.lessonTimeId)), items)
             post.await()
         }
 
@@ -318,7 +421,7 @@ class AttendanceViewModelTest {
     }
 
     @Test
-    fun fridayNextDayCannotMoveIntoFutureWeek() = runTest {
+    fun fridayNextDayCanMoveIntoFutureWeek() = runTest {
         val friday = LocalDate.of(2026, 9, 11)
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeAttendanceRepository()
@@ -329,8 +432,8 @@ class AttendanceViewModelTest {
         viewModel.nextDay()
         advanceUntilIdle()
 
-        assertEquals(friday, viewModel.uiState.value.selectedDate)
-        assertEquals(1, repository.requests.size)
+        assertEquals(LocalDate.of(2026, 9, 14), viewModel.uiState.value.selectedDate)
+        assertEquals(2, repository.requests.size)
     }
 
     @Test
@@ -350,7 +453,7 @@ class AttendanceViewModelTest {
     }
 
     @Test
-    fun nextWeekIsDisabledForCurrentWeek() = runTest {
+    fun nextWeekCanMoveBeyondCurrentWeek() = runTest {
         val today = LocalDate.of(2026, 9, 9)
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeAttendanceRepository()
@@ -361,8 +464,8 @@ class AttendanceViewModelTest {
         viewModel.nextWeek()
         advanceUntilIdle()
 
-        assertEquals(today, viewModel.uiState.value.selectedDate)
-        assertEquals(1, repository.requests.size)
+        assertEquals(today.plusWeeks(1), viewModel.uiState.value.selectedDate)
+        assertEquals(2, repository.requests.size)
     }
 
     @Test
@@ -467,21 +570,20 @@ class AttendanceViewModelTest {
     }
 
     @Test
-    fun cannotSelectDatesOutsideSchoolYearOrFutureWeek() = runTest {
+    fun cannotSelectDatesOutsideSchoolYearButCanSelectFutureWeek() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeAttendanceRepository()
         val viewModel = AttendanceViewModel(repository, activeStudentManager, fixedClock(LocalDate.of(2026, 9, 9)))
 
         activeStudentManager.initialize(listOf(firstStudent))
         advanceUntilIdle()
-        val selectedDate = viewModel.uiState.value.selectedDate
         viewModel.selectDate(LocalDate.of(2026, 8, 31))
         viewModel.selectDate(LocalDate.of(2027, 7, 1))
         viewModel.selectDate(LocalDate.of(2026, 9, 14))
         advanceUntilIdle()
 
-        assertEquals(selectedDate, viewModel.uiState.value.selectedDate)
-        assertEquals(1, repository.requests.size)
+        assertEquals(LocalDate.of(2026, 9, 14), viewModel.uiState.value.selectedDate)
+        assertEquals(2, repository.requests.size)
     }
 
     @Test

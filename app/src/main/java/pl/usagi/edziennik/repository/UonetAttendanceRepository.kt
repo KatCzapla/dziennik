@@ -63,19 +63,20 @@ class UonetAttendanceRepository @Inject constructor(
         )
     }
 
-    override suspend fun submitExcuse(date: LocalDate, lessonTimeId: Int?, content: String) {
+    override suspend fun submitExcuses(items: List<AttendanceExcuseRequest>, content: String) {
+        require(items.isNotEmpty()) { "At least one excuse is required" }
         require(content.codePointCount(0, content.length) <= 256) { "Excuse content exceeds 256 characters" }
         val student = activeStudentManager.requireActiveStudent(AttendanceRepositoryException.NoActiveStudent)
         dataSource.submitExcuse(
             SubmitAttendanceExcuseDto(
                 studentKey = student.key,
                 content = content,
-                excuses = listOf(
+                excuses = items.map { item ->
                     SubmitAttendanceExcuseLessonDto(
-                        date.atStartOfDay(ZoneId.of("Europe/Warsaw")).format(EXCUSE_DAY_FORMAT),
-                        lessonTimeId,
-                    ),
-                ),
+                        item.date.atStartOfDay(ZoneId.of("Europe/Warsaw")).format(EXCUSE_DAY_FORMAT),
+                        item.lessonTimeId,
+                    )
+                },
             ),
         )
     }
