@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="timetable_widget_background">#12181C</color>
+    <color name="timetable_widget_text">#E7EEF0</color>
+    <color name="timetable_widget_secondary_text">#C1CDD1</color>
+    <color name="timetable_widget_accent">#75D4E2</color>
+    <color name="timetable_widget_error">#FFB4AB</color>
+</resources>

@@ -1,6 +1,8 @@
 package pl.usagi.edziennik.background
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import pl.usagi.edziennik.domain.AttendanceStatus
@@ -13,6 +15,29 @@ import pl.usagi.edziennik.persistence.changes.SyncIssue
 import java.time.LocalDate
 
 class PeriodicSyncRunTest {
+    @Test fun manualAndPeriodicRunsCannotSyncConcurrently() = runTest {
+        var active = 0
+        var maximumActive = 0
+        var calls = 0
+        val sync = object : SnapshotSynchronizer {
+            override suspend fun syncOnce(): OneShotSyncResult {
+                active++
+                maximumActive = maxOf(maximumActive, active)
+                calls++
+                delay(10)
+                active--
+                return OneShotSyncResult(emptyList(), emptyMap())
+            }
+        }
+        val runner = PeriodicSyncRun({ true }, sync, FakeNotifier())
+        val first = launch { runner.run() }
+        val second = launch { runner.run() }
+        first.join()
+        second.join()
+        assertEquals(2, calls)
+        assertEquals(1, maximumActive)
+    }
+
     private val date = LocalDate.of(2026, 9, 30)
     private val event = ChangeEvent.AttendanceChanged(
         AttendanceKey(date, 12, null), "Matematyka", AttendanceStatus.Absent, true,

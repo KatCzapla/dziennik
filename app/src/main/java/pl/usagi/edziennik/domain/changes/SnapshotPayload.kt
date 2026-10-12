@@ -12,7 +12,10 @@ sealed interface SnapshotPayload {
     data class Grades(val items: List<GradeSnapshot>) : SnapshotPayload
 
     @Serializable @SerialName("timetable")
-    data class Timetable(val items: List<TimetableSnapshot>) : SnapshotPayload
+    data class Timetable(
+        val items: List<TimetableSnapshot>,
+        val lastCompleteAtEpochMillis: Long? = null,
+    ) : SnapshotPayload
 
     @Serializable @SerialName("attendance")
     data class Attendance(val items: List<AttendanceSnapshot>) : SnapshotPayload

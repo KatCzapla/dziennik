@@ -40,6 +40,7 @@ import pl.usagi.edziennik.repository.ReceivedMessagesPage
 import pl.usagi.edziennik.repository.SchoolTasksFetchResult
 import pl.usagi.edziennik.repository.SchoolTasksRepository
 import pl.usagi.edziennik.repository.TimetableRepository
+import pl.usagi.edziennik.widget.TimetableWidgetUpdater
 import java.io.File
 import java.math.BigDecimal
 import java.time.Clock
@@ -63,10 +64,37 @@ class OneShotSnapshotSyncTest {
     private val information = FakeInformation()
     private val payments = FakePayments()
     private val clock = Clock.fixed(Instant.parse("2026-09-30T12:00:00Z"), ZoneId.of("Europe/Warsaw"))
+    private var widgetUpdates = 0
     private val sync = OneShotSnapshotSync(
-        identity, activeStudents, SnapshotSyncManager(store, Json, identity), messages, grades,
+        identity, activeStudents, SnapshotSyncManager(store, Json, identity, clock,
+            TimetableWidgetUpdater { widgetUpdates++ }), messages, grades,
         timetable, attendance, tasks, information, payments, clock,
     )
+
+    @Test fun completePlanSyncSavesReadableSnapshotAndRedrawsWidget() = runTest {
+        identity.selectStudent(student.diaryId)
+        timetable.items = listOf(TimetableEntry(today, null, LocalTime.of(9, 0), LocalTime.of(9, 45),
+            "Matematyka", null, room = "215", changes = emptyList()))
+        sync.syncOnce()
+        val result = LocalTimetableReader(store, identity, Json, clock).read(today) as LocalTimetableResult.Available
+        assertEquals("Matematyka", result.lessons.single().subject)
+        assertEquals(clock.instant(), result.lastCompleteAt)
+        assertEquals(1, widgetUpdates)
+    }
+
+    @Test fun failedPlanFetchPreservesPlanTimestampAndDoesNotRequestRedraw() = runTest {
+        identity.selectStudent(student.diaryId)
+        timetable.items = listOf(TimetableEntry(today, null, LocalTime.of(9, 0), LocalTime.of(9, 45),
+            "Matematyka", null, room = "215", changes = emptyList()))
+        sync.syncOnce()
+        val reader = LocalTimetableReader(store, identity, Json, clock)
+        val before = reader.read(today)
+        timetable.fail = true
+        val result = sync.syncOnce()
+        assertEquals(SyncIssue.FAILED, result.issues[SnapshotArea.TIMETABLE])
+        assertEquals(before, reader.read(today))
+        assertEquals(1, widgetUpdates)
+    }
 
     @Test fun firstCompleteSyncBuildsBaselinesWithoutEvents() = runTest {
         val result = sync.syncOnce()
@@ -280,9 +308,10 @@ class OneShotSnapshotSyncTest {
 
     private class FakeTimetable : TimetableRepository {
         var fail = false
+        var items: List<TimetableEntry> = emptyList()
         override suspend fun getTimetable(from: LocalDate, to: LocalDate): List<TimetableEntry> {
             if (fail) error("Timetable failed")
-            return emptyList()
+            return items
         }
     }
 

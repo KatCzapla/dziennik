@@ -84,7 +84,7 @@ private fun partsWithColon(first: String?, second: String?): String =
 private fun String?.shortened(): String? {
     val normalized = this?.replace(notificationWhitespace, " ")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     return if (normalized.length <= TASK_DESCRIPTION_LIMIT) normalized
-    else normalized.take(TASK_DESCRIPTION_LIMIT).trimEnd() + "…"
+    else normalized.take(TASK_DESCRIPTION_LIMIT).trimEnd() + "..."
 }
 
 private fun taskTitle(rawType: Int, isNew: Boolean, date: LocalDate): String {
@@ -169,6 +169,7 @@ class AndroidChangeNotifier @Inject constructor(
 @Module
 @InstallIn(SingletonComponent::class)
 object BackgroundModule {
+    @Provides fun manualSyncQueue(impl: WorkManagerManualSyncQueue): ManualSyncWorkQueue = impl
     @Provides fun scheduler(impl: PeriodicSyncScheduler): SyncScheduler = impl
     @Provides fun session(impl: BackgroundSessionPreparer): SyncSession = impl
     @Provides fun notifier(impl: AndroidChangeNotifier): ChangeNotifier = impl

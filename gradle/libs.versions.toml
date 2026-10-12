@@ -9,6 +9,7 @@ activityCompose = "1.13.0"
 lifecycle = "2.11.0"
 navigationCompose = "2.9.0"
 composeBom = "2026.02.01"
+glance = "1.2.0"
 serializationJson = "1.9.0"
 coroutines = "1.9.0"
 okhttp = "5.0.0-alpha.14"
@@ -32,6 +33,7 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
+androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "androidxHilt" }
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-android-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }

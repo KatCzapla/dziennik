@@ -31,6 +31,7 @@ class PeriodicSyncScheduler @Inject constructor(
 
     override fun cancel() {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        WorkManager.getInstance(context).cancelUniqueWork(ManualSyncScheduler.WORK_NAME)
     }
 
     companion object {

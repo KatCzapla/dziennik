@@ -12,12 +12,16 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.domain.changes.SnapshotArea
+import pl.usagi.edziennik.domain.changes.SnapshotScope
 import pl.usagi.edziennik.domain.time.WeekRange
 import pl.usagi.edziennik.domain.time.clampedSchoolWeekEnd
 import pl.usagi.edziennik.domain.time.clampedSchoolWeekStart
 import pl.usagi.edziennik.domain.time.currentSchoolYearRange
 import pl.usagi.edziennik.domain.time.isSelectableSchoolDate
 import pl.usagi.edziennik.repository.TimetableRepository
+import pl.usagi.edziennik.persistence.changes.LocalSnapshotIdentity
+import pl.usagi.edziennik.persistence.changes.SnapshotSyncManager
 import java.time.Clock
 import java.time.LocalDate
 import javax.inject.Inject
@@ -27,6 +31,8 @@ class TimetableViewModel @Inject constructor(
     private val timetableRepository: TimetableRepository,
     private val activeStudentManager: ActiveStudentManager,
     private val clock: Clock,
+    private val snapshotSyncManager: SnapshotSyncManager,
+    private val localIdentity: LocalSnapshotIdentity,
 ) : ViewModel() {
     private val schoolYearRange = currentSchoolYearRange(LocalDate.now(clock))
     private val _uiState = MutableStateFlow(
@@ -132,6 +138,11 @@ class TimetableViewModel @Inject constructor(
         if (loadedWeek == week && loadingJob?.isActive != true) return
         loadingJob?.cancel()
         val requestId = ++loadId
+        val from = week.clampedSchoolWeekStart(schoolYearRange)
+        val to = week.clampedSchoolWeekEnd(schoolYearRange)
+        val snapshotScope = localIdentity.currentAccountId()?.let { accountId ->
+            SnapshotScope(accountId, localIdentity.studentScopeId(student.diaryId), SnapshotArea.TIMETABLE, "$from/$to")
+        }
         loadingJob = viewModelScope.launch {
             _uiState.update { state ->
                 state.copy(
@@ -142,9 +153,20 @@ class TimetableViewModel @Inject constructor(
 
             try {
                 val entries = timetableRepository.getTimetable(
-                    from = week.clampedSchoolWeekStart(schoolYearRange),
-                    to = week.clampedSchoolWeekEnd(schoolYearRange),
+                    from = from,
+                    to = to,
                 )
+                if (loadId != requestId || activeStudentManager.activeStudent.value != student ||
+                    _uiState.value.displayedWeek != week) return@launch
+                if (snapshotScope != null) {
+                    try {
+                        snapshotSyncManager.saveCompleteTimetable(snapshotScope, entries)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // A local storage failure must not hide the successfully fetched plan.
+                    }
+                }
                 if (loadId != requestId || activeStudentManager.activeStudent.value != student ||
                     _uiState.value.displayedWeek != week) return@launch
                 _uiState.update { state ->

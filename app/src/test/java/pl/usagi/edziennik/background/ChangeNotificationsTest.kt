@@ -134,7 +134,7 @@ class ChangeNotificationsTest {
             "  Pierwsza  linia\n\tDruga   linia  ").notificationSpec()
         assertEquals("Historia, Pierwsza linia Druga linia", normalized.text)
         val long = ChangeEvent.TaskChanged(TaskKey(4, 42), date, null, true, "a".repeat(120)).notificationSpec()
-        assertEquals("a".repeat(100) + "…", long.text)
+        assertEquals("a".repeat(100) + "...", long.text)
     }
 
     @Test fun allAttendanceStatusesHaveReadableLabels() {

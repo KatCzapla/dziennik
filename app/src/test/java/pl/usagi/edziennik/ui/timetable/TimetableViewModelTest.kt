@@ -5,6 +5,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.Job
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -13,7 +14,23 @@ import pl.usagi.edziennik.MainDispatcherRule
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.TimetableEntry
+import pl.usagi.edziennik.domain.TimetableChange
+import pl.usagi.edziennik.domain.TimetableChangeKind
+import pl.usagi.edziennik.domain.changes.ChangeEvent
+import pl.usagi.edziennik.domain.changes.LocalAccountId
+import pl.usagi.edziennik.domain.changes.SnapshotArea
+import pl.usagi.edziennik.domain.changes.SnapshotScope
+import pl.usagi.edziennik.persistence.changes.CurrentSnapshotData
+import pl.usagi.edziennik.persistence.changes.LocalIdentityStore
+import pl.usagi.edziennik.persistence.changes.LocalSnapshotIdentity
+import pl.usagi.edziennik.persistence.changes.LocalTimetableReader
+import pl.usagi.edziennik.persistence.changes.LocalTimetableResult
+import pl.usagi.edziennik.persistence.changes.SnapshotStore
+import pl.usagi.edziennik.persistence.changes.SnapshotSyncManager
+import pl.usagi.edziennik.persistence.changes.SnapshotWrite
+import pl.usagi.edziennik.persistence.changes.SyncCompleteness
 import pl.usagi.edziennik.repository.TimetableRepository
+import pl.usagi.edziennik.widget.TimetableWidgetUpdater
 import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalTime
@@ -27,11 +44,161 @@ class TimetableViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
 
+    private val identityStore = MemoryIdentityStore()
+    private val identity = LocalSnapshotIdentity(identityStore)
+    private val snapshotStore = MemorySnapshotStore()
+    private var widgetUpdates = 0
+
+    @Test
+    fun successfulFetchFromScreenRedrawsWidgetAfterSavingSnapshot() = runTest {
+        val repository = FakeTimetableRepository().apply {
+            entries = listOf(timetableEntry(LocalDate.of(2026, 9, 9)))
+        }
+        createViewModel(repository, selectedStudentManager(), fixedClock())
+        advanceUntilIdle()
+        assertEquals(1, widgetUpdates)
+        assertEquals("Matematyka", (localReader().read() as LocalTimetableResult.Available).lessons.single().subject)
+    }
+
+    @Test
+    fun planFetchedByScreenIsReadableAfterRecreatingLocalReaderWithoutHttp() = runTest {
+        val date = LocalDate.of(2026, 9, 9)
+        val manager = selectedStudentManager()
+        val repository = FakeTimetableRepository().apply { entries = listOf(timetableEntry(date)) }
+        createViewModel(repository, manager, fixedClock())
+        advanceUntilIdle()
+
+        val reader = LocalTimetableReader(snapshotStore, LocalSnapshotIdentity(identityStore), Json, fixedClock())
+        val result = reader.read(date) as LocalTimetableResult.Available
+        assertEquals("Matematyka", result.lessons.single().subject)
+        assertEquals(fixedClock().instant(), result.lastCompleteAt)
+        assertEquals(1, repository.requests.size)
+        assertEquals("2026-09-07/2026-09-11", snapshotStore.lastScope!!.range)
+        assertEquals(identity.currentAccountId(), snapshotStore.lastScope!!.accountId)
+        assertEquals(identity.selectedStudentScopeId(), snapshotStore.lastScope!!.studentScopeId)
+    }
+
+    @Test
+    fun completeEmptyPlanFromScreenIsAvailableNotNoBaseline() = runTest {
+        createViewModel(FakeTimetableRepository(), selectedStudentManager(), fixedClock())
+        advanceUntilIdle()
+
+        val result = localReader().read() as LocalTimetableResult.Available
+        assertTrue(result.lessons.isEmpty())
+        assertEquals(fixedClock().instant(), result.lastCompleteAt)
+    }
+
+    @Test
+    fun failedScreenFetchDoesNotCreateBaseline() = runTest {
+        val repository = FakeTimetableRepository().apply { failure = IllegalStateException("Invalid response") }
+        val viewModel = createViewModel(repository, selectedStudentManager(), fixedClock())
+        advanceUntilIdle()
+
+        assertEquals(LocalTimetableResult.NoBaseline, localReader().read())
+        assertTrue(snapshotStore.payloads.isEmpty())
+        assertEquals(0, widgetUpdates)
+        assertTrue(viewModel.uiState.value.errorMessage != null)
+    }
+
+    @Test
+    fun failedRefreshPreservesPlanAndLastCompleteTime() = runTest {
+        val date = LocalDate.of(2026, 9, 9)
+        val repository = FakeTimetableRepository().apply { entries = listOf(timetableEntry(date)) }
+        val manager = selectedStudentManager()
+        createViewModel(repository, manager, fixedClock())
+        advanceUntilIdle()
+        val saved = snapshotStore.payloads.toMap()
+
+        repository.failure = IllegalStateException("Failed fetch")
+        createViewModel(repository, manager, fixedClock(date.plusDays(1)))
+        advanceUntilIdle()
+
+        assertEquals(saved, snapshotStore.payloads)
+        assertEquals(fixedClock().instant(), (localReader().read(date) as LocalTimetableResult.Available).lastCompleteAt)
+    }
+
+    @Test
+    fun screenUpdatesSharedSnapshotSilentlyAndBackgroundStillDetectsLaterChanges() = runTest {
+        val date = LocalDate.of(2026, 9, 9)
+        val manager = selectedStudentManager()
+        val scope = SnapshotScope(identity.currentAccountId()!!, identity.selectedStudentScopeId(),
+            SnapshotArea.TIMETABLE, "2026-09-07/2026-09-11")
+        val sync = SnapshotSyncManager(snapshotStore, Json, identity, fixedClock())
+        val ordinary = timetableEntry(date)
+        sync.sync(scope, SyncCompleteness.Complete, CurrentSnapshotData.Timetable(listOf(ordinary)))
+        val cancelled = ordinary.copy(changes = listOf(TimetableChange(
+            changeType = 4,
+            kind = TimetableChangeKind.Cancelled,
+            teacherType = null,
+            day = null,
+            lessonNumber = null,
+            startTime = null,
+            endTime = null,
+            group = null,
+            subject = null,
+            teacher = null,
+            room = null,
+            absenceInformation = null,
+        )))
+        createViewModel(FakeTimetableRepository().apply { entries = listOf(cancelled) }, manager, fixedClock())
+        advanceUntilIdle()
+
+        assertTrue((localReader().read(date) as LocalTimetableResult.Available).lessons.single().cancelled)
+        assertTrue(snapshotStore.emittedEvents.isEmpty())
+        assertTrue(sync.sync(scope, SyncCompleteness.Complete, CurrentSnapshotData.Timetable(listOf(cancelled))).isEmpty())
+        assertEquals(1, sync.sync(scope, SyncCompleteness.Complete,
+            CurrentSnapshotData.Timetable(listOf(ordinary))).size)
+    }
+
+    @Test
+    fun missingActiveStudentLeavesNoBaseline() = runTest {
+        identity.ensureAccountId()
+        identity.selectStudent(firstStudent.diaryId)
+        val repository = FakeTimetableRepository()
+        createViewModel(repository, ActiveStudentManager(), fixedClock())
+        advanceUntilIdle()
+
+        assertEquals(LocalTimetableResult.NoBaseline, localReader().read())
+        assertTrue(repository.requests.isEmpty())
+    }
+
+    @Test
+    fun localWriteFailureDoesNotHideFetchedPlanOrCreateBaseline() = runTest {
+        snapshotStore.failWrites = true
+        val repository = FakeTimetableRepository().apply {
+            entries = listOf(timetableEntry(LocalDate.of(2026, 9, 9)))
+        }
+        val viewModel = createViewModel(repository, selectedStudentManager(), fixedClock())
+        advanceUntilIdle()
+
+        assertEquals("Matematyka", viewModel.uiState.value.entries.single().subject)
+        assertEquals(null, viewModel.uiState.value.errorMessage)
+        assertEquals(LocalTimetableResult.NoBaseline, localReader().read())
+        assertEquals(0, widgetUpdates)
+    }
+
+    private fun selectedStudentManager(): ActiveStudentManager {
+        identity.ensureAccountId()
+        identity.selectStudent(firstStudent.diaryId)
+        return ActiveStudentManager().apply { initialize(listOf(firstStudent)) }
+    }
+
+    private fun localReader() = LocalTimetableReader(snapshotStore, identity, Json, fixedClock())
+
+    private fun createViewModel(repository: TimetableRepository, manager: ActiveStudentManager, clock: Clock) =
+        TimetableViewModel(repository, manager, clock, SnapshotSyncManager(snapshotStore, Json, identity, clock,
+            TimetableWidgetUpdater {
+                assertTrue(snapshotStore.payloads.isNotEmpty())
+                widgetUpdates++
+            }), identity)
+
     @Test
     fun lateWeekResponseCannotReplaceNewerWeek() = runTest {
+        identity.ensureAccountId()
+        identity.selectStudent(firstStudent.diaryId)
         val manager = ActiveStudentManager()
         val repository = DelayedTimetableRepository()
-        val viewModel = TimetableViewModel(repository, manager, fixedClock())
+        val viewModel = createViewModel(repository, manager, fixedClock())
         manager.initialize(listOf(firstStudent))
         runCurrent()
 
@@ -43,13 +210,16 @@ class TimetableViewModelTest {
         repository.finishFirst(timetableEntry(LocalDate.of(2026, 9, 9)).copy(subject = "Old"))
         advanceUntilIdle()
         assertEquals("New", viewModel.uiState.value.entries.single().subject)
+        assertEquals(LocalTimetableResult.NoBaseline, localReader().read(LocalDate.of(2026, 9, 9)))
+        assertEquals("New", (localReader().read(LocalDate.of(2026, 9, 14)) as LocalTimetableResult.Available)
+            .lessons.single().subject)
     }
 
     @Test
     fun lateStudentResponseCannotReplaceNewerStudent() = runTest {
         val manager = ActiveStudentManager()
         val repository = DelayedTimetableRepository()
-        val viewModel = TimetableViewModel(repository, manager, fixedClock())
+        val viewModel = createViewModel(repository, manager, fixedClock())
         manager.initialize(listOf(firstStudent, secondStudent))
         manager.setActiveStudent(firstStudent)
         runCurrent()
@@ -81,7 +251,7 @@ class TimetableViewModelTest {
     fun activeStudentChangeReloadsTimetable() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeTimetableRepository()
-        val viewModel = TimetableViewModel(repository, activeStudentManager, fixedClock())
+        val viewModel = createViewModel(repository, activeStudentManager, fixedClock())
 
         activeStudentManager.initialize(listOf(firstStudent, secondStudent))
         activeStudentManager.setActiveStudent(firstStudent)
@@ -96,7 +266,7 @@ class TimetableViewModelTest {
     fun emptyRepositoryResponseIsEmptyStateNotError() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeTimetableRepository()
-        val viewModel = TimetableViewModel(repository, activeStudentManager, fixedClock())
+        val viewModel = createViewModel(repository, activeStudentManager, fixedClock())
 
         activeStudentManager.initialize(listOf(firstStudent))
         advanceUntilIdle()
@@ -109,7 +279,7 @@ class TimetableViewModelTest {
     fun changingDayInsideLoadedWeekDoesNotReloadTimetable() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeTimetableRepository()
-        val viewModel = TimetableViewModel(repository, activeStudentManager, fixedClock())
+        val viewModel = createViewModel(repository, activeStudentManager, fixedClock())
 
         activeStudentManager.initialize(listOf(firstStudent))
         advanceUntilIdle()
@@ -125,7 +295,7 @@ class TimetableViewModelTest {
     fun changingToNextWeekReloadsTimetable() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeTimetableRepository()
-        val viewModel = TimetableViewModel(repository, activeStudentManager, fixedClock())
+        val viewModel = createViewModel(repository, activeStudentManager, fixedClock())
 
         activeStudentManager.initialize(listOf(firstStudent))
         advanceUntilIdle()
@@ -139,7 +309,7 @@ class TimetableViewModelTest {
     fun previousWeekKeepsCorrespondingSchoolDayAndReloadsTimetable() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeTimetableRepository()
-        val viewModel = TimetableViewModel(repository, activeStudentManager, fixedClock())
+        val viewModel = createViewModel(repository, activeStudentManager, fixedClock())
 
         activeStudentManager.initialize(listOf(firstStudent))
         advanceUntilIdle()
@@ -155,7 +325,7 @@ class TimetableViewModelTest {
     fun nextWeekKeepsCorrespondingSchoolDayAndReloadsTimetable() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeTimetableRepository()
-        val viewModel = TimetableViewModel(repository, activeStudentManager, fixedClock())
+        val viewModel = createViewModel(repository, activeStudentManager, fixedClock())
 
         activeStudentManager.initialize(listOf(firstStudent))
         advanceUntilIdle()
@@ -171,7 +341,7 @@ class TimetableViewModelTest {
     fun previousWeekIsDisabledBeforeSchoolYearStartAndRequestIsClamped() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeTimetableRepository()
-        val viewModel = TimetableViewModel(repository, activeStudentManager, fixedClock(LocalDate.of(2026, 9, 1)))
+        val viewModel = createViewModel(repository, activeStudentManager, fixedClock(LocalDate.of(2026, 9, 1)))
 
         activeStudentManager.initialize(listOf(firstStudent))
         advanceUntilIdle()
@@ -187,7 +357,7 @@ class TimetableViewModelTest {
     fun nextWeekIsDisabledAfterSchoolYearEndAndRequestIsClamped() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeTimetableRepository()
-        val viewModel = TimetableViewModel(repository, activeStudentManager, fixedClock(LocalDate.of(2027, 6, 30)))
+        val viewModel = createViewModel(repository, activeStudentManager, fixedClock(LocalDate.of(2027, 6, 30)))
 
         activeStudentManager.initialize(listOf(firstStudent))
         advanceUntilIdle()
@@ -203,7 +373,7 @@ class TimetableViewModelTest {
     fun cannotSelectDatesOutsideSchoolYear() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeTimetableRepository()
-        val viewModel = TimetableViewModel(repository, activeStudentManager, fixedClock())
+        val viewModel = createViewModel(repository, activeStudentManager, fixedClock())
 
         activeStudentManager.initialize(listOf(firstStudent))
         advanceUntilIdle()
@@ -220,7 +390,7 @@ class TimetableViewModelTest {
     fun activeStudentChangeReloadsDisplayedWeekWithoutChangingSelectedDate() = runTest {
         val activeStudentManager = ActiveStudentManager()
         val repository = FakeTimetableRepository()
-        val viewModel = TimetableViewModel(repository, activeStudentManager, fixedClock())
+        val viewModel = createViewModel(repository, activeStudentManager, fixedClock())
 
         activeStudentManager.initialize(listOf(firstStudent, secondStudent))
         activeStudentManager.setActiveStudent(firstStudent)
@@ -251,10 +421,40 @@ class TimetableViewModelTest {
 
     private class FakeTimetableRepository : TimetableRepository {
         val requests = mutableListOf<Pair<LocalDate, LocalDate>>()
+        var entries: List<TimetableEntry> = emptyList()
+        var failure: Exception? = null
 
         override suspend fun getTimetable(from: LocalDate, to: LocalDate): List<TimetableEntry> {
             requests += from to to
-            return emptyList()
+            failure?.let { throw it }
+            return entries
+        }
+    }
+
+    private class MemoryIdentityStore : LocalIdentityStore {
+        private val values = mutableMapOf<String, String>()
+        override fun get(key: String): String? = values[key]
+        override fun put(key: String, value: String) { values[key] = value }
+        override fun clear() { values.clear() }
+    }
+
+    private class MemorySnapshotStore : SnapshotStore {
+        val payloads = mutableMapOf<String, String>()
+        val emittedEvents = mutableListOf<ChangeEvent>()
+        var lastScope: SnapshotScope? = null
+        var failWrites = false
+
+        override suspend fun read(scope: SnapshotScope): String? = payloads[scope.storageKey]
+        override suspend fun update(scope: SnapshotScope, transform: (String?) -> SnapshotWrite): List<ChangeEvent> {
+            if (failWrites) error("Storage unavailable")
+            lastScope = scope
+            val write = transform(payloads[scope.storageKey])
+            write.payload?.let { payloads[scope.storageKey] = it }
+            emittedEvents += write.events
+            return write.events
+        }
+        override suspend fun deleteAccount(accountId: LocalAccountId) {
+            payloads.keys.removeAll { it.startsWith("${accountId.value}|") }
         }
     }
 

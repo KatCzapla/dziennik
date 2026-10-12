@@ -26,7 +26,10 @@ import pl.usagi.edziennik.domain.changes.gradeSnapshots
 import pl.usagi.edziennik.domain.changes.informationSnapshots
 import pl.usagi.edziennik.domain.changes.taskSnapshots
 import pl.usagi.edziennik.domain.changes.timetableSnapshots
+import java.time.Clock
 import javax.inject.Inject
+import pl.usagi.edziennik.widget.TimetableWidgetUpdater
+import pl.usagi.edziennik.widget.updateSafely
 
 sealed interface SyncCompleteness {
     data object Complete : SyncCompleteness
@@ -52,7 +55,26 @@ class SnapshotSyncManager @Inject constructor(
     private val store: SnapshotStore,
     private val json: Json,
     private val identity: LocalSnapshotIdentity,
+    private val clock: Clock = Clock.systemUTC(),
+    private val widgetUpdater: TimetableWidgetUpdater = TimetableWidgetUpdater {},
 ) {
+    // Foreground reads refresh the same baseline without producing notification events.
+    suspend fun saveCompleteTimetable(scope: SnapshotScope, entries: List<TimetableEntry>) {
+        require(scope.area == SnapshotArea.TIMETABLE)
+        if (scope.accountId != identity.currentAccountId()) return
+        var written = false
+        store.update(scope) {
+            if (scope.accountId != identity.currentAccountId()) return@update SnapshotWrite(null)
+            val payload = SnapshotPayload.Timetable(
+                entries.timetableSnapshots(),
+                lastCompleteAtEpochMillis = clock.millis(),
+            )
+            written = true
+            SnapshotWrite(json.encodeToString<SnapshotPayload>(payload))
+        }
+        if (written) widgetUpdater.updateSafely()
+    }
+
     suspend fun knownMessageIds(scope: SnapshotScope): Set<Int>? {
         require(scope.area == SnapshotArea.MESSAGES)
         if (scope.accountId != identity.currentAccountId()) return null
@@ -76,9 +98,15 @@ class SnapshotSyncManager @Inject constructor(
             if (scope.area !in setOf(SnapshotArea.ATTENDANCE, SnapshotArea.TASKS)) return emptyList()
         }
 
-        return store.update(scope) { saved ->
+        var timetableWritten = false
+        val events = store.update(scope) { saved ->
             if (scope.accountId != identity.currentAccountId()) return@update SnapshotWrite(null)
-            val next = current.toPayload()
+            timetableWritten = scope.area == SnapshotArea.TIMETABLE && completeness == SyncCompleteness.Complete
+            val next = current.toPayload().let { payload ->
+                if (payload is SnapshotPayload.Timetable && completeness == SyncCompleteness.Complete) {
+                    payload.copy(lastCompleteAtEpochMillis = clock.millis())
+                } else payload
+            }
             if (saved == null) {
                 if (completeness == SyncCompleteness.Complete) SnapshotWrite(json.encodeToString<SnapshotPayload>(next))
                 else SnapshotWrite(null)
@@ -95,6 +123,8 @@ class SnapshotSyncManager @Inject constructor(
                 SnapshotWrite(json.encodeToString<SnapshotPayload>(persisted), events)
             }
         }
+        if (timetableWritten) widgetUpdater.updateSafely()
+        return events
     }
 
     private fun CurrentSnapshotData.area(): SnapshotArea = when (this) {
