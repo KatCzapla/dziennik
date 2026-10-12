@@ -21,7 +21,12 @@ sealed interface SnapshotPayload {
     data class Attendance(val items: List<AttendanceSnapshot>) : SnapshotPayload
 
     @Serializable @SerialName("tasks")
-    data class Tasks(val items: List<TaskSnapshot>) : SnapshotPayload
+    data class Tasks(
+        val items: List<TaskSnapshot>,
+        val lastCompleteAtEpochMillis: Long? = null,
+        val calendarRangeComplete: Boolean = false,
+        val failedDetailKeys: Set<TaskKey> = emptySet(),
+    ) : SnapshotPayload
 
     @Serializable @SerialName("information")
     data class Information(val items: List<InformationSnapshot>) : SnapshotPayload

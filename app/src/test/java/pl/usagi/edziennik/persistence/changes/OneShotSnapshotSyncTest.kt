@@ -71,6 +71,84 @@ class OneShotSnapshotSyncTest {
         timetable, attendance, tasks, information, payments, clock,
     )
 
+    @Test fun taskSyncRequestsThreeWeeksIncludingSundays() = runTest {
+        sync.syncOnce()
+        assertEquals(listOf(LocalDate.of(2026, 9, 28) to LocalDate.of(2026, 10, 4),
+            LocalDate.of(2026, 10, 5) to LocalDate.of(2026, 10, 11),
+            LocalDate.of(2026, 10, 12) to LocalDate.of(2026, 10, 18)), tasks.requests)
+    }
+
+    @Test fun taskSyncOnMondayRequestsTwoWeeks() = runTest {
+        synchronizer(LocalDate.of(2026, 10, 12)).syncOnce()
+        assertEquals(listOf(LocalDate.of(2026, 10, 12) to LocalDate.of(2026, 10, 18),
+            LocalDate.of(2026, 10, 19) to LocalDate.of(2026, 10, 25)), tasks.requests)
+    }
+
+    @Test fun weekendTasksReachLocalReaderThroughExistingRepositoryFlow() = runTest {
+        identity.selectStudent(student.diaryId)
+        tasks.items = listOf(task("Sobota").copy(date = today.plusDays(3)),
+            task("Niedziela").copy(date = today.plusDays(4), id = 4))
+        val first = sync.syncOnce()
+        assertTrue(first.events.isEmpty())
+        val result = LocalTasksReader(store, identity, Json, clock).read(today)
+        assertEquals(TaskRangeCoverage.FULL, result.coverage)
+        assertEquals(listOf("Sobota", "Niedziela"), result.tasks.map { it.description })
+        assertTrue(result.weeks.all { it.lastCompleteAt == clock.instant() })
+    }
+
+    @Test fun failedWeekKeepsOldDataAndDoesNotStopOtherWeeksOrLoseFailedIssue() = runTest {
+        identity.selectStudent(student.diaryId)
+        tasks.items = listOf(task("Zachowany opis"))
+        sync.syncOnce()
+        val firstWeek = taskSnapshotWeeks(today).first()
+        val firstScope = SnapshotScope(identity.currentAccountId()!!, identity.selectedStudentScopeId(),
+            SnapshotArea.TASKS, firstWeek.scopeRange)
+        val oldPayload = store.payloads.getValue(firstScope.storageKey)
+        tasks.failedWeeks += firstWeek.from
+        val future = task(null).copy(date = today.plusDays(7), id = 4)
+        tasks.items += future
+        tasks.failedDetails = setOf(TaskKey(4, 4))
+        val result = sync.syncOnce()
+        assertEquals(SyncIssue.FAILED, result.issues[SnapshotArea.TASKS])
+        assertEquals(6, tasks.requests.size)
+        assertEquals(oldPayload, store.payloads.getValue(firstScope.storageKey))
+        assertEquals(1, result.events.filterIsInstance<ChangeEvent.TaskChanged>().size)
+        assertEquals(setOf(3, 4), LocalTasksReader(store, identity, Json, clock).read(today).tasks.map { it.key.id }.toSet())
+    }
+
+    @Test fun partialFirstWeekDoesNotCreateBaselineButOtherWeeksComplete() = runTest {
+        identity.selectStudent(student.diaryId)
+        tasks.items = listOf(task(null))
+        tasks.failedDetails = setOf(TaskKey(4, 3))
+        val result = sync.syncOnce()
+        assertEquals(SyncIssue.PARTIAL, result.issues[SnapshotArea.TASKS])
+        assertTrue(result.events.isEmpty())
+        val local = LocalTasksReader(store, identity, Json, clock).read(today)
+        assertEquals(TaskRangeCoverage.PARTIAL, local.coverage)
+        assertEquals(TaskRangeCoverage.NO_BASELINE, local.weeks.first().coverage)
+        assertEquals(2, local.weeks.count { it.coverage == TaskRangeCoverage.FULL })
+    }
+
+    @Test fun newFutureWeekBaselineIsQuietThenChangesAreDetectedOnce() = runTest {
+        tasks.items = listOf(task("Istniejace zadanie").copy(date = today.plusDays(7)))
+        assertTrue(sync.syncOnce().events.isEmpty())
+        tasks.items += task("Nowe zadanie").copy(date = today.plusDays(8), id = 4)
+        val changed = sync.syncOnce()
+        assertEquals(listOf(TaskKey(4, 4)), changed.events.filterIsInstance<ChangeEvent.TaskChanged>().map { it.key })
+        assertTrue(sync.syncOnce().events.isEmpty())
+    }
+
+    @Test fun tasksAtYearEndUseOnlyClippedCalendarRange() = runTest {
+        synchronizer(LocalDate.of(2024, 6, 29)).syncOnce()
+        assertEquals(listOf(LocalDate.of(2024, 6, 24) to LocalDate.of(2024, 6, 30)), tasks.requests)
+    }
+
+    private fun synchronizer(date: LocalDate): OneShotSnapshotSync {
+        val atDate = Clock.fixed(date.atStartOfDay(clock.zone).toInstant(), clock.zone)
+        return OneShotSnapshotSync(identity, activeStudents, SnapshotSyncManager(store, Json, identity, atDate),
+            messages, grades, timetable, attendance, tasks, information, payments, atDate)
+    }
+
     @Test fun completePlanSyncSavesReadableSnapshotAndRedrawsWidget() = runTest {
         identity.selectStudent(student.diaryId)
         timetable.items = listOf(TimetableEntry(today, null, LocalTime.of(9, 0), LocalTime.of(9, 45),
@@ -101,7 +179,7 @@ class OneShotSnapshotSyncTest {
 
         assertTrue(result.events.isEmpty())
         assertTrue(result.issues.isEmpty())
-        assertEquals(7, store.payloads.size)
+        assertEquals(9, store.payloads.size)
     }
 
     @Test fun secondSyncEmitsChangeAndThirdDoesNotRepeatIt() = runTest {
@@ -165,7 +243,7 @@ class OneShotSnapshotSyncTest {
         assertTrue(first.issues.isEmpty())
         assertTrue(second.issues.isEmpty())
         assertTrue(second.events.isEmpty())
-        assertEquals(7, store.payloads.size)
+        assertEquals(9, store.payloads.size)
     }
 
     @Test fun incompleteMessagePaginationDoesNotAdvanceBaseline() = runTest {
@@ -230,7 +308,7 @@ class OneShotSnapshotSyncTest {
         val result = sync.syncOnce()
 
         assertEquals(SyncIssue.PARTIAL, result.issues[SnapshotArea.MESSAGES])
-        assertEquals(6, store.payloads.size)
+        assertEquals(8, store.payloads.size)
     }
 
     @Test fun persistedSnapshotsContainNoSessionKeyStudentKeyOrBankAccountNumber() = runTest {
@@ -329,9 +407,16 @@ class OneShotSnapshotSyncTest {
     private class FakeTasks : SchoolTasksRepository {
         var items = emptyList<SchoolTask>()
         var failedDetails = emptySet<TaskKey>()
+        val requests = mutableListOf<Pair<LocalDate, LocalDate>>()
+        val failedWeeks = mutableSetOf<LocalDate>()
         override suspend fun getSchoolTasks(from: LocalDate, to: LocalDate): List<SchoolTask> = items
-        override suspend fun getSchoolTasksWithCompleteness(from: LocalDate, to: LocalDate) =
-            SchoolTasksFetchResult(items, failedDetails)
+        override suspend fun getSchoolTasksWithCompleteness(from: LocalDate, to: LocalDate): SchoolTasksFetchResult {
+            requests += from to to
+            if (from in failedWeeks) error("Task week failed")
+            val scoped = items.filter { it.date in from..to }
+            val keys = scoped.mapTo(mutableSetOf()) { TaskKey(it.rawType, it.id) }
+            return SchoolTasksFetchResult(scoped, failedDetails.intersect(keys))
+        }
     }
 
     private class FakeInformation : DashboardRepository {

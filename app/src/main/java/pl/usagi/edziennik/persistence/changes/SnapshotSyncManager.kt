@@ -26,9 +26,11 @@ import pl.usagi.edziennik.domain.changes.gradeSnapshots
 import pl.usagi.edziennik.domain.changes.informationSnapshots
 import pl.usagi.edziennik.domain.changes.taskSnapshots
 import pl.usagi.edziennik.domain.changes.timetableSnapshots
+import pl.usagi.edziennik.domain.time.isWeekday
 import java.time.Clock
 import javax.inject.Inject
 import pl.usagi.edziennik.widget.TimetableWidgetUpdater
+import pl.usagi.edziennik.widget.TasksWidgetUpdater
 import pl.usagi.edziennik.widget.updateSafely
 
 sealed interface SyncCompleteness {
@@ -46,7 +48,7 @@ sealed interface CurrentSnapshotData {
     data class Grades(val periodId: Int, val grades: pl.usagi.edziennik.domain.Grades) : CurrentSnapshotData
     data class Timetable(val items: List<TimetableEntry>) : CurrentSnapshotData
     data class Attendance(val items: List<AttendanceEntry>) : CurrentSnapshotData
-    data class Tasks(val items: List<SchoolTask>) : CurrentSnapshotData
+    data class Tasks(val items: List<SchoolTask>, val calendarRangeComplete: Boolean = false) : CurrentSnapshotData
     data class Information(val items: List<DashboardInformation>) : CurrentSnapshotData
     data class Payments(val payments: PaymentsSnapshot) : CurrentSnapshotData
 }
@@ -57,6 +59,7 @@ class SnapshotSyncManager @Inject constructor(
     private val identity: LocalSnapshotIdentity,
     private val clock: Clock = Clock.systemUTC(),
     private val widgetUpdater: TimetableWidgetUpdater = TimetableWidgetUpdater {},
+    private val tasksWidgetUpdater: TasksWidgetUpdater = TasksWidgetUpdater {},
 ) {
     // Foreground reads refresh the same baseline without producing notification events.
     suspend fun saveCompleteTimetable(scope: SnapshotScope, entries: List<TimetableEntry>) {
@@ -99,15 +102,19 @@ class SnapshotSyncManager @Inject constructor(
         }
 
         var timetableWritten = false
+        var tasksWritten = false
         val events = store.update(scope) { saved ->
             if (scope.accountId != identity.currentAccountId()) return@update SnapshotWrite(null)
             timetableWritten = scope.area == SnapshotArea.TIMETABLE && completeness == SyncCompleteness.Complete
             val next = current.toPayload().let { payload ->
-                if (payload is SnapshotPayload.Timetable && completeness == SyncCompleteness.Complete) {
-                    payload.copy(lastCompleteAtEpochMillis = clock.millis())
-                } else payload
+                when {
+                    completeness != SyncCompleteness.Complete -> payload
+                    payload is SnapshotPayload.Timetable -> payload.copy(lastCompleteAtEpochMillis = clock.millis())
+                    payload is SnapshotPayload.Tasks -> payload.copy(lastCompleteAtEpochMillis = clock.millis())
+                    else -> payload
+                }
             }
-            if (saved == null) {
+            val write = if (saved == null) {
                 if (completeness == SyncCompleteness.Complete) SnapshotWrite(json.encodeToString<SnapshotPayload>(next))
                 else SnapshotWrite(null)
             } else {
@@ -122,8 +129,11 @@ class SnapshotSyncManager @Inject constructor(
                 }
                 SnapshotWrite(json.encodeToString<SnapshotPayload>(persisted), events)
             }
+            tasksWritten = scope.area == SnapshotArea.TASKS && write.payload != null
+            write
         }
         if (timetableWritten) widgetUpdater.updateSafely()
+        if (tasksWritten) tasksWidgetUpdater.updateSafely()
         return events
     }
 
@@ -152,7 +162,7 @@ class SnapshotSyncManager @Inject constructor(
         is CurrentSnapshotData.Grades -> SnapshotPayload.Grades(grades.gradeSnapshots(periodId))
         is CurrentSnapshotData.Timetable -> SnapshotPayload.Timetable(items.timetableSnapshots())
         is CurrentSnapshotData.Attendance -> SnapshotPayload.Attendance(items.attendanceSnapshots())
-        is CurrentSnapshotData.Tasks -> SnapshotPayload.Tasks(items.taskSnapshots())
+        is CurrentSnapshotData.Tasks -> SnapshotPayload.Tasks(items.taskSnapshots(), calendarRangeComplete = calendarRangeComplete)
         is CurrentSnapshotData.Information -> SnapshotPayload.Information(items.informationSnapshots())
         is CurrentSnapshotData.Payments -> SnapshotPayload.Payments(payments)
     }
@@ -165,7 +175,14 @@ class SnapshotSyncManager @Inject constructor(
             detectTimetable(items, current.items)
         this is SnapshotPayload.Attendance && current is CurrentSnapshotData.Attendance ->
             detectAttendance(items, current.items)
-        this is SnapshotPayload.Tasks && current is CurrentSnapshotData.Tasks -> detectTasks(items, current.items)
+        this is SnapshotPayload.Tasks && current is CurrentSnapshotData.Tasks -> {
+            val previousKeys = items.mapTo(mutableSetOf()) { it.key }
+            // Newly covered weekend dates establish baseline; they were not compared before.
+            val comparable = if (!calendarRangeComplete && current.calendarRangeComplete) {
+                current.items.filter { it.date.isWeekday() || TaskKey(it.rawType, it.id) in previousKeys }
+            } else current.items
+            detectTasks(items, comparable)
+        }
         this is SnapshotPayload.Information && current is CurrentSnapshotData.Information ->
             detectInformation(items, current.items)
         this is SnapshotPayload.Payments && current is CurrentSnapshotData.Payments ->
@@ -181,10 +198,15 @@ class SnapshotSyncManager @Inject constructor(
         this is SnapshotPayload.Tasks && next is SnapshotPayload.Tasks -> {
             val previousByKey = items.associateBy { it.key }
             val currentKeys = next.items.mapTo(mutableSetOf()) { it.key }
-            SnapshotPayload.Tasks(items.filter { it.key !in currentKeys } + next.items.map { task ->
-                if (task.key in partial.failedTaskDetails) task.copy(details = previousByKey[task.key]?.details)
-                else task
-            })
+            SnapshotPayload.Tasks(
+                items = items.filter { it.key !in currentKeys } + next.items.map { task ->
+                    if (task.key in partial.failedTaskDetails) task.copy(details = previousByKey[task.key]?.details)
+                    else task
+                },
+                lastCompleteAtEpochMillis = lastCompleteAtEpochMillis,
+                calendarRangeComplete = calendarRangeComplete || next.calendarRangeComplete,
+                failedDetailKeys = (failedDetailKeys - currentKeys) + partial.failedTaskDetails,
+            )
         }
         else -> error("Partial merge is only supported for attendance and tasks")
     }

@@ -25,7 +25,7 @@ internal fun enqueueLocalTimetableWidgetUpdate(context: Context, waitForManualFi
 class LocalTimetableWidgetUpdateWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted parameters: WorkerParameters,
-    private val updater: TimetableWidgetUpdater,
+    private val updater: WidgetUpdater,
 ) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result = try {
         if (inputData.getBoolean(WAIT_FOR_MANUAL_FINISH, false)) {

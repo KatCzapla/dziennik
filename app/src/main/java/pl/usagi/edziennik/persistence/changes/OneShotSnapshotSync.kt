@@ -8,6 +8,7 @@ import pl.usagi.edziennik.domain.changes.LocalAccountId
 import pl.usagi.edziennik.domain.changes.LocalStudentScopeId
 import pl.usagi.edziennik.domain.changes.SnapshotArea
 import pl.usagi.edziennik.domain.changes.SnapshotScope
+import pl.usagi.edziennik.domain.changes.TaskKey
 import pl.usagi.edziennik.domain.changes.messageSnapshots
 import pl.usagi.edziennik.domain.changes.toSnapshot
 import pl.usagi.edziennik.domain.time.WeekRange
@@ -63,7 +64,7 @@ class OneShotSnapshotSync @Inject constructor(
             try {
                 val result = block()
                 events += result.events
-                result.issue?.let { issues[area] = it }
+                result.issue?.let { if (issues[area] != SyncIssue.FAILED) issues[area] = it }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -127,16 +128,22 @@ class OneShotSnapshotSync @Inject constructor(
                 ), if (complete) null else SyncIssue.PARTIAL)
             }
 
+        }
+
+        for (taskWeek in taskSnapshotWeeks(today)) {
             area(SnapshotArea.TASKS) {
-                val fetched = schoolTasksRepository.getSchoolTasksWithCompleteness(from, to)
+                val fetched = schoolTasksRepository.getSchoolTasksWithCompleteness(taskWeek.from, taskWeek.to)
                 requireCurrent(accountId, student)
-                val complete = fetched.failedDetailKeys.isEmpty()
+                val tasks = fetched.tasks.filter { it.date in taskWeek.from..taskWeek.to }
+                val keys = tasks.mapTo(mutableSetOf()) { TaskKey(it.rawType, it.id) }
+                val failedDetails = fetched.failedDetailKeys.intersect(keys)
+                val complete = failedDetails.isEmpty()
                 val completeness = if (complete) SyncCompleteness.Complete
-                else SyncCompleteness.Partial(mainListComplete = true, failedTaskDetails = fetched.failedDetailKeys)
+                else SyncCompleteness.Partial(mainListComplete = true, failedTaskDetails = failedDetails)
                 AreaResult(snapshotSyncManager.sync(
-                    SnapshotScope(accountId, studentId, SnapshotArea.TASKS, range),
+                    SnapshotScope(accountId, studentId, SnapshotArea.TASKS, taskWeek.scopeRange),
                     completeness,
-                    CurrentSnapshotData.Tasks(fetched.tasks),
+                    CurrentSnapshotData.Tasks(tasks, calendarRangeComplete = true),
                 ), if (complete) null else SyncIssue.PARTIAL)
             }
         }

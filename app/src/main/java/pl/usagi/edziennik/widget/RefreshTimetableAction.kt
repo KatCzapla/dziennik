@@ -22,5 +22,5 @@ class RefreshTimetableAction : ActionCallback {
 @InstallIn(SingletonComponent::class)
 interface RefreshTimetableEntryPoint {
     fun scheduler(): ManualSyncScheduler
-    fun updater(): TimetableWidgetUpdater
+    fun updater(): WidgetUpdater
 }

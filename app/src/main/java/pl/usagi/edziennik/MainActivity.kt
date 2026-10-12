@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_NOTIFICATION_ROUTE = "notification_route"
 
         fun isAllowedRoute(route: String): Boolean = route in setOf(
-            "home", "messages", "grades", "timetable", "attendance", "payments",
-        ) || Regex("schoolTasks\\?taskId=\\d+&taskType=\\d+&taskDate=\\d{4}-\\d{2}-\\d{2}").matches(route)
+            "home", "messages", "grades", "timetable", "attendance", "payments", "schoolTasks",
+        ) || Regex("schoolTasks\\?taskId=\\d+&taskType=-?\\d+&taskDate=\\d{4}-\\d{2}-\\d{2}").matches(route)
     }
 }

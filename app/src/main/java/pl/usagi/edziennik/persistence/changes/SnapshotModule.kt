@@ -10,12 +10,20 @@ import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 import pl.usagi.edziennik.widget.GlanceTimetableWidgetUpdater
 import pl.usagi.edziennik.widget.TimetableWidgetUpdater
+import pl.usagi.edziennik.widget.GlanceTasksWidgetUpdater
+import pl.usagi.edziennik.widget.TasksWidgetUpdater
+import pl.usagi.edziennik.widget.LocalWidgetsUpdater
+import pl.usagi.edziennik.widget.WidgetUpdater
 
 @Module
 @InstallIn(SingletonComponent::class)
 object SnapshotModule {
     @Provides
     fun widgetUpdater(impl: GlanceTimetableWidgetUpdater): TimetableWidgetUpdater = impl
+    @Provides
+    fun tasksWidgetUpdater(impl: GlanceTasksWidgetUpdater): TasksWidgetUpdater = impl
+    @Provides
+    fun localWidgetsUpdater(impl: LocalWidgetsUpdater): WidgetUpdater = impl
     @Provides @Singleton
     fun database(@ApplicationContext context: Context): SnapshotDatabase =
         Room.databaseBuilder(context, SnapshotDatabase::class.java, "student_snapshots.db").build()

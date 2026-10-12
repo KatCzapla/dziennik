@@ -2,8 +2,6 @@ package pl.usagi.edziennik.widget
 
 import android.content.Context
 import android.content.Intent
-import android.appwidget.AppWidgetManager
-import android.content.ComponentName
 import androidx.work.WorkManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -55,7 +53,7 @@ class TodayTimetableWidgetReceiver : GlanceAppWidgetReceiver() {
     @Inject
     lateinit var contentReader: TodayTimetableContentReader
     @Inject
-    lateinit var invalidations: TimetableWidgetInvalidations
+    lateinit var invalidations: LocalWidgetInvalidations
 
     override val glanceAppWidget: GlanceAppWidget by lazy {
         TodayTimetableWidget(
@@ -65,23 +63,15 @@ class TodayTimetableWidgetReceiver : GlanceAppWidgetReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (isWidgetClockBroadcast(intent.action)) {
-            val ids = AppWidgetManager.getInstance(context)
-                .getAppWidgetIds(ComponentName(context, TodayTimetableWidgetReceiver::class.java))
-            if (ids.isNotEmpty()) enqueueLocalTimetableWidgetUpdate(context)
-        } else {
+        if (!handleWidgetClockBroadcast(context, intent, TodayTimetableWidgetReceiver::class.java)) {
             super.onReceive(context, intent)
         }
     }
 }
 
-internal fun isWidgetClockBroadcast(action: String?): Boolean = action in setOf(
-    Intent.ACTION_DATE_CHANGED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_BOOT_COMPLETED,
-)
-
 internal class TodayTimetableWidget(
     private val contentReader: TodayTimetableContentReader,
-    private val invalidations: TimetableWidgetInvalidations,
+    private val invalidations: LocalWidgetInvalidations,
 ) : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val presentation = withContext(Dispatchers.IO) { contentReader.read() }
