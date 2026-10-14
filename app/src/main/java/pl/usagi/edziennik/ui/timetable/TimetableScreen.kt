@@ -1,5 +1,10 @@
 package pl.usagi.edziennik.ui.timetable
 
+import androidx.compose.ui.res.stringResource
+import pl.usagi.edziennik.R
+import pl.usagi.edziennik.domain.SchoolDayOff
+import pl.usagi.edziennik.ui.components.DaysOffNotice
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -49,7 +54,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import kotlinx.coroutines.launch
-import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.TimetableChange
 import pl.usagi.edziennik.domain.TimetableEntry
 import pl.usagi.edziennik.domain.time.firstSelectableSchoolDate
@@ -71,6 +75,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun TimetableRoute(
     onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     viewModel: TimetableViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -83,7 +88,7 @@ fun TimetableRoute(
         onNextWeek = viewModel::nextWeek,
         onToday = viewModel::currentWeek,
         onRetry = viewModel::retry,
-        onStudentSelected = viewModel::selectStudent,
+        onOpenSettings = onOpenSettings,
     )
 }
 
@@ -96,7 +101,7 @@ private fun TimetableScreen(
     onNextWeek: () -> Unit,
     onToday: () -> Unit,
     onRetry: () -> Unit,
-    onStudentSelected: (Student) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
     val firstPagerDate = remember(state.schoolYearRange) {
@@ -134,9 +139,7 @@ private fun TimetableScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             EDziennikTopBar(
-                activeStudent = state.activeStudent,
-                students = state.students,
-                onStudentSelected = onStudentSelected,
+                onOpenSettings = onOpenSettings,
                 showBack = true,
                 onBack = onBack,
             )
@@ -168,6 +171,7 @@ private fun TimetableScreen(
             )
 
             if (state.errorMessage != null) {
+                DaysOffNotice(state.daysOffFor(state.selectedDate), state.daysOffLoading, state.daysOffFailed)
                 ErrorState(
                     title = "Plan chwilowo niedostępny",
                     message = state.errorMessage,
@@ -185,6 +189,10 @@ private fun TimetableScreen(
                         val pageDate = selectableSchoolDateAt(firstPagerDate, page)
                         DayPlanPage(
                             date = pageDate,
+                            daysOff = state.daysOffFor(pageDate),
+                            daysOffLoading = state.daysOffLoading,
+                            daysOffFailed = state.daysOffFailed,
+                            showNoLessons = state.showNoLessonsFor(pageDate),
                             entries = if (pageDate == state.selectedDate) {
                                 state.selectedDayEntries
                             } else {
@@ -404,6 +412,10 @@ private fun DaySelectorItem(
 private fun DayPlanPage(
     date: LocalDate,
     entries: List<TimetableEntry>,
+    daysOff: List<SchoolDayOff>,
+    daysOffLoading: Boolean,
+    daysOffFailed: Boolean,
+    showNoLessons: Boolean,
 ) {
     val spacing = EDziennikTheme.spacing
 
@@ -419,14 +431,18 @@ private fun DayPlanPage(
             )
         }
 
-        if (entries.isEmpty()) {
+        if (daysOff.isNotEmpty() || daysOffLoading || daysOffFailed) {
+            item { DaysOffNotice(daysOff, daysOffLoading, daysOffFailed) }
+        }
+
+        if (showNoLessons) {
             item {
                 EmptyState(
-                    title = "Brak lekcji tego dnia",
+                    title = stringResource(R.string.timetable_no_lessons_today),
                     message = "",
                 )
             }
-        } else {
+        } else if (entries.isNotEmpty()) {
             items(entries) { entry ->
                 TimetableRow(entry = entry)
             }

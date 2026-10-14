@@ -126,6 +126,17 @@ class LocalTasksReaderTest {
         assertTrue(result.tasks.isEmpty())
     }
 
+    @Test fun logoutDuringReadReturnsSignedOutAndDiscardsAllPreviousTasks() = runTest {
+        selectStudent()
+        completeAll(listOf(task(start)))
+        store.onRead = { identity.clearAccount() }
+        val result = reader().read(start)
+        assertTrue(result.isLoggedOut)
+        assertEquals(TaskRangeCoverage.NO_BASELINE, result.coverage)
+        assertTrue(result.tasks.isEmpty())
+        assertTrue(result.weeks.all { it.lastCompleteAt == null })
+    }
+
     @Test fun recreatedReaderUsesPersistedIdentityAndSnapshotsWithoutHttp() = runTest {
         selectStudent()
         completeAll(listOf(task(start)))

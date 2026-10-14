@@ -2,6 +2,7 @@ package pl.usagi.edziennik.ui.grades
 
 import pl.usagi.edziennik.domain.ClassificationPeriod
 import pl.usagi.edziennik.domain.Grade
+import pl.usagi.edziennik.domain.GradeColumn
 import pl.usagi.edziennik.domain.Grades
 import pl.usagi.edziennik.domain.SubjectGrades
 import java.math.BigDecimal
@@ -40,6 +41,11 @@ fun Grades.subjectByPosition(position: Int): SubjectGrades? =
 
 fun SubjectGrades.gradeCount(): Int =
     columns.sumOf { it.grades.size }
+
+fun SubjectGrades.gradesByDate(): List<Pair<GradeColumn, IndexedValue<Grade>>> =
+    columns.flatMap { column ->
+        column.grades.withIndex().map { indexedGrade -> column to indexedGrade }
+    }.sortedByDescending { (_, indexedGrade) -> indexedGrade.value.date }
 
 fun SubjectGrades.hasPresentableGrades(showAverageAndPoints: Boolean): Boolean =
     gradeCount() > 0 ||

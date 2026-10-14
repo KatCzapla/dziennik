@@ -14,4 +14,8 @@ interface SchoolTasksRepository {
         SchoolTasksFetchResult(getSchoolTasks(from, to), emptySet())
 }
 
-data class SchoolTasksFetchResult(val tasks: List<SchoolTask>, val failedDetailKeys: Set<TaskKey>)
+data class SchoolTasksFetchResult(
+    val tasks: List<SchoolTask>,
+    val failedDetailKeys: Set<TaskKey>,
+    val detailFailures: Map<TaskKey, Exception> = emptyMap(),
+)

@@ -22,6 +22,7 @@ data class UpcomingTasksPresentation(
     val coverage: TaskRangeCoverage,
     val message: String?,
     val lastCompleteLabel: String?,
+    val isLoggedOut: Boolean = false,
 )
 
 private val polishTasks = Locale.forLanguageTag("pl-PL")
@@ -37,6 +38,10 @@ internal fun shortWidgetTaskDescription(value: String?): String? {
 
 fun presentUpcomingTasks(result: LocalTasksResult, zoneId: ZoneId): UpcomingTasksPresentation {
     val rangeFormat = if (result.from.year == result.to.year) taskDateFormat else taskYearDateFormat
+    if (result.isLoggedOut) return UpcomingTasksPresentation(
+        "${result.from.format(rangeFormat)} - ${result.to.format(rangeFormat)}", emptyList(), TaskRangeCoverage.NO_BASELINE,
+        "Zaloguj się, aby zobaczyć sprawdziany i zadania", null, isLoggedOut = true,
+    )
     val items = if (result.coverage == TaskRangeCoverage.NO_BASELINE) emptyList() else result.tasks
         .filter { it.date in result.from..result.to }
         .sortedWith(compareBy({ it.date }, { it.key.rawType }, { it.key.id }))

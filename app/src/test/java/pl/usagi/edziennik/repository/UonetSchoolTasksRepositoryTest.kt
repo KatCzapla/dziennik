@@ -113,6 +113,7 @@ class UonetSchoolTasksRepositoryTest {
 
         assertEquals(listOf(1, 2), result.tasks.map { it.id })
         assertEquals(setOf(TaskKey(4, 1)), result.failedDetailKeys)
+        assertEquals(500, (result.detailFailures.getValue(TaskKey(4, 1)) as SchoolTasksFetchException.Http).statusCode)
         assertEquals(null, result.tasks.first().details)
         assertEquals("Homework 2", result.tasks.last().details?.description)
     }

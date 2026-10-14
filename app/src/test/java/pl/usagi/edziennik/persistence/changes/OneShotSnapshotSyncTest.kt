@@ -71,6 +71,38 @@ class OneShotSnapshotSyncTest {
         timetable, attendance, tasks, information, payments, clock,
     )
 
+    @Test fun networkFailureCauseIsPropagatedWithoutBlockingSuccessfulAreas() = runTest {
+        timetable.failure = java.io.IOException("test network failure")
+        val result = sync.syncOnce()
+        assertEquals(SyncFailureCause.NETWORK, result.failureCauses[SnapshotArea.TIMETABLE])
+        assertEquals(SyncIssue.FAILED, result.issues[SnapshotArea.TIMETABLE])
+        assertTrue(SnapshotArea.MESSAGES in result.successfulAreas)
+    }
+
+    @Test fun serverFailureCauseIsPropagated() = runTest {
+        timetable.failure = pl.usagi.edziennik.network.timetable.TimetableFetchException.Http(503)
+        val result = sync.syncOnce()
+        assertEquals(SyncFailureCause.SERVER, result.failureCauses[SnapshotArea.TIMETABLE])
+    }
+
+    @Test fun partialExcusesNetworkFailureIsAvailableForRetryDecision() = runTest {
+        attendance.excusesComplete = false
+        attendance.excusesFailure = java.io.IOException()
+        val result = sync.syncOnce()
+        assertEquals(SyncIssue.PARTIAL, result.issues[SnapshotArea.ATTENDANCE])
+        assertEquals(SyncFailureCause.NETWORK, result.failureCauses[SnapshotArea.ATTENDANCE])
+    }
+
+    @Test fun partialTaskDetailsServerFailureIsAvailableForRetryDecision() = runTest {
+        tasks.items = listOf(task("Opis"))
+        val key = TaskKey(tasks.items.single().rawType, tasks.items.single().id)
+        tasks.failedDetails = setOf(key)
+        tasks.detailFailures = mapOf(key to pl.usagi.edziennik.network.schooltasks.SchoolTasksFetchException.Http(503))
+        val result = sync.syncOnce()
+        assertEquals(SyncIssue.PARTIAL, result.issues[SnapshotArea.TASKS])
+        assertEquals(SyncFailureCause.SERVER, result.failureCauses[SnapshotArea.TASKS])
+    }
+
     @Test fun taskSyncRequestsThreeWeeksIncludingSundays() = runTest {
         sync.syncOnce()
         assertEquals(listOf(LocalDate.of(2026, 9, 28) to LocalDate.of(2026, 10, 4),
@@ -386,8 +418,10 @@ class OneShotSnapshotSyncTest {
 
     private class FakeTimetable : TimetableRepository {
         var fail = false
+        var failure: Exception? = null
         var items: List<TimetableEntry> = emptyList()
         override suspend fun getTimetable(from: LocalDate, to: LocalDate): List<TimetableEntry> {
+            failure?.let { throw it }
             if (fail) error("Timetable failed")
             return items
         }
@@ -397,9 +431,10 @@ class OneShotSnapshotSyncTest {
         var items = emptyList<AttendanceEntry>()
         var excusesComplete = true
         var entriesComplete = true
+        var excusesFailure: Exception? = null
         override suspend fun getAttendance(from: LocalDate, to: LocalDate): List<AttendanceEntry> = items
         override suspend fun getAttendanceWithCompleteness(from: LocalDate, to: LocalDate) =
-            AttendanceFetchResult(items, excusesComplete, entriesComplete)
+            AttendanceFetchResult(items, excusesComplete, entriesComplete, excusesFailure = excusesFailure)
         override suspend fun getSubjects() = error("Not used")
         override suspend fun getStatistics(subjectId: Int) = error("Not used")
     }
@@ -407,6 +442,7 @@ class OneShotSnapshotSyncTest {
     private class FakeTasks : SchoolTasksRepository {
         var items = emptyList<SchoolTask>()
         var failedDetails = emptySet<TaskKey>()
+        var detailFailures = emptyMap<TaskKey, Exception>()
         val requests = mutableListOf<Pair<LocalDate, LocalDate>>()
         val failedWeeks = mutableSetOf<LocalDate>()
         override suspend fun getSchoolTasks(from: LocalDate, to: LocalDate): List<SchoolTask> = items
@@ -415,7 +451,7 @@ class OneShotSnapshotSyncTest {
             if (from in failedWeeks) error("Task week failed")
             val scoped = items.filter { it.date in from..to }
             val keys = scoped.mapTo(mutableSetOf()) { TaskKey(it.rawType, it.id) }
-            return SchoolTasksFetchResult(scoped, failedDetails.intersect(keys))
+            return SchoolTasksFetchResult(scoped, failedDetails.intersect(keys), detailFailures.filterKeys { it in keys })
         }
     }
 

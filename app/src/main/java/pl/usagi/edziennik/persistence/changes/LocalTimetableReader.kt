@@ -17,6 +17,7 @@ import java.time.LocalDate
 import javax.inject.Inject
 
 sealed interface LocalTimetableResult {
+    data object LoggedOut : LocalTimetableResult
     data object NoBaseline : LocalTimetableResult
 
     data class Available(
@@ -32,7 +33,7 @@ class LocalTimetableReader @Inject constructor(
     private val clock: Clock,
 ) {
     suspend fun read(date: LocalDate = LocalDate.now(clock)): LocalTimetableResult {
-        val accountId = identity.currentAccountId() ?: return LocalTimetableResult.NoBaseline
+        val accountId = identity.currentAccountId() ?: return LocalTimetableResult.LoggedOut
         val studentId = identity.selectedStudentScopeId() ?: return LocalTimetableResult.NoBaseline
         val week = WeekRange.fromDate(date)
         val schoolYear = currentSchoolYearRange(date)
@@ -41,10 +42,11 @@ class LocalTimetableReader @Inject constructor(
 
         val range = "${week.clampedSchoolWeekStart(schoolYear)}/${week.clampedSchoolWeekEnd(schoolYear)}"
         val scope = SnapshotScope(accountId, studentId, SnapshotArea.TIMETABLE, range)
-        val saved = store.read(scope) ?: return LocalTimetableResult.NoBaseline
+        val saved = store.read(scope)
         if (identity.currentAccountId() != accountId || identity.selectedStudentScopeId() != studentId) {
-            return LocalTimetableResult.NoBaseline
+            return if (identity.currentAccountId() == null) LocalTimetableResult.LoggedOut else LocalTimetableResult.NoBaseline
         }
+        if (saved == null) return LocalTimetableResult.NoBaseline
         val snapshot = json.decodeFromString<SnapshotPayload>(saved) as SnapshotPayload.Timetable
         return LocalTimetableResult.Available(
             lessons = snapshot.items.filter { it.slot.date == date }.sortedBy { it.slot.start },

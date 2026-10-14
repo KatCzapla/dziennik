@@ -1,6 +1,10 @@
 package pl.usagi.edziennik.ui.dashboard
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.res.stringResource
+import pl.usagi.edziennik.R
+import pl.usagi.edziennik.domain.SchoolDayOff
+import pl.usagi.edziennik.ui.components.DaysOffNotice
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,14 +18,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Assignment
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.ArrowOutward
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.Mail
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Info
@@ -29,9 +39,11 @@ import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.ExpandLess
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -49,14 +61,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.Role
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.domain.AttendanceStatus
 import pl.usagi.edziennik.domain.DashboardInformation
 import pl.usagi.edziennik.network.messages.MessagesDiagnostics
 import pl.usagi.edziennik.network.session.LoggedInUser
-import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.messages.dashboardUnreadBadgeLabel
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
@@ -74,9 +88,9 @@ fun DashboardRoute(
     onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
     onOpenPayments: () -> Unit,
-    onLogout: () -> Unit,
     showEnableNotifications: Boolean = false,
     onEnableNotifications: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -84,7 +98,6 @@ fun DashboardRoute(
     DashboardScreen(
         state = state,
         loggedInUser = loggedInUser,
-        onStudentSelected = viewModel::selectStudent,
         onShowTodayTimetable = viewModel::showTodayTimetable,
         onShowTomorrowTimetable = viewModel::showTomorrowTimetable,
         onOpenTimetable = onOpenTimetable,
@@ -95,17 +108,16 @@ fun DashboardRoute(
         onOpenTask = onOpenTask,
         onOpenMessages = onOpenMessages,
         onOpenPayments = onOpenPayments,
-        onLogout = onLogout,
         showEnableNotifications = showEnableNotifications,
         onEnableNotifications = onEnableNotifications,
+        onOpenSettings = onOpenSettings,
     )
 }
 
 @Composable
-private fun DashboardScreen(
+internal fun DashboardScreen(
     state: DashboardUiState,
     loggedInUser: LoggedInUser?,
-    onStudentSelected: (Student) -> Unit,
     onShowTodayTimetable: () -> Unit,
     onShowTomorrowTimetable: () -> Unit,
     onOpenTimetable: () -> Unit,
@@ -116,9 +128,9 @@ private fun DashboardScreen(
     onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
     onOpenPayments: () -> Unit,
-    onLogout: () -> Unit,
     showEnableNotifications: Boolean,
     onEnableNotifications: () -> Unit,
+    onOpenSettings: () -> Unit = {},
 ) {
     val spacing = EDziennikTheme.spacing
 
@@ -127,16 +139,27 @@ private fun DashboardScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            EDziennikTopBar(
-                activeStudent = state.activeStudent,
-                students = state.students,
-                onStudentSelected = onStudentSelected,
-                actions = {
-                    TextButton(onClick = onLogout) {
-                        Text("Wyloguj")
-                    }
-                },
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().statusBarsPadding()
+                    .padding(start = spacing.lg, end = spacing.md, top = spacing.sm, bottom = spacing.md),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(spacing.xs),
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(spacing.xs)) {
+                    val name = dashboardGreetingName(loggedInUser?.name)
+                    Text(
+                        text = if (name == null) stringResource(R.string.dashboard_greeting_default)
+                            else stringResource(R.string.dashboard_greeting_named, name),
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onBackground,
+                    )
+                    Text(state.today.dashboardHeaderLabel(), style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title))
+                }
+            }
         },
     ) { paddingValues ->
         LazyColumn(
@@ -145,23 +168,8 @@ private fun DashboardScreen(
                 .padding(paddingValues)
                 .padding(horizontal = spacing.lg),
             verticalArrangement = Arrangement.spacedBy(spacing.lg),
+            contentPadding = PaddingValues(vertical = spacing.sm),
         ) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(spacing.xs)) {
-                    Spacer(modifier = Modifier.height(spacing.sm))
-                    Text(
-                        text = dashboardGreeting(loggedInUser?.name),
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
-                    )
-                    Text(
-                        text = state.today.dashboardHeaderLabel(),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
             item {
                 DashboardQuickNavigation(
                     onOpenTimetable = onOpenTimetable,
@@ -189,20 +197,17 @@ private fun DashboardScreen(
                     selectedDay = state.selectedTimetableDay,
                     selectedDate = state.selectedTimetableDate,
                     section = state.selectedTimetable,
+                    daysOff = state.selectedDaysOff,
+                    daysOffLoading = state.daysOffLoading,
+                    daysOffFailed = state.daysOffFailed,
+                    showNoLessons = state.showNoLessons,
+                    onOpenTimetable = onOpenTimetable,
+                    onOpenAttendance = onOpenAttendance,
                     onToggleDay = when (state.selectedTimetableDay) {
                         DashboardTimetableDay.Today -> onShowTomorrowTimetable
                         DashboardTimetableDay.Tomorrow -> onShowTodayTimetable
                     },
                 )
-            }
-
-            state.todayAttendance.data?.takeIf { it.isNotEmpty() }?.let { entries ->
-                item {
-                    AttendanceSection(
-                        entries = entries,
-                        onOpenAttendance = onOpenAttendance,
-                    )
-                }
             }
 
             item {
@@ -351,11 +356,19 @@ private fun TimetableSection(
     selectedDay: DashboardTimetableDay,
     selectedDate: java.time.LocalDate,
     section: DashboardSection<List<DashboardLesson>>,
+    daysOff: List<SchoolDayOff>,
+    daysOffLoading: Boolean,
+    daysOffFailed: Boolean,
+    showNoLessons: Boolean,
+    onOpenTimetable: () -> Unit,
+    onOpenAttendance: () -> Unit,
     onToggleDay: () -> Unit,
 ) {
     DashboardSectionLayout(
-        title = "PLAN LEKCJI",
+        title = stringResource(R.string.dashboard_timetable_title),
         icon = Icons.Outlined.CalendarMonth,
+        action = stringResource(R.string.dashboard_full_timetable),
+        onAction = onOpenTimetable,
     ) {
         DashboardTimetableDaySelector(
             selectedDay = selectedDay,
@@ -377,16 +390,30 @@ private fun TimetableSection(
 //                color = MaterialTheme.colorScheme.onSurfaceVariant,
 //            )
 //        }
-        SectionBody(
-            section = section,
-            emptyText = "Brak lekcji",
-        ) { lessons ->
-            Column(verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.sm)) {
-                lessons.forEach { lesson ->
-                    DashboardLessonRow(lesson = lesson)
+        if (daysOff.isNotEmpty() || daysOffLoading || daysOffFailed) {
+            DaysOffNotice(daysOff, daysOffLoading, daysOffFailed)
+        }
+        if (section.isLoading || section.errorMessage != null || !section.data.isNullOrEmpty() || showNoLessons) {
+            SectionBody(
+                section = section,
+                emptyText = stringResource(R.string.dashboard_no_lessons),
+            ) { lessons ->
+                Column(verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.sm)) {
+                    lessons.forEach { lesson ->
+                        DashboardLessonRow(lesson = lesson)
+                    }
                 }
             }
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ){
+        DashboardTextLink(
+            text = stringResource(R.string.dashboard_attendance_link),
+            onClick = onOpenAttendance,
+        )
+            }
     }
 }
 
@@ -404,13 +431,13 @@ private fun DashboardTimetableDaySelector(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         DashboardTimetableDaySelectorItem(
-            label = "Dzisiaj",
+            label = stringResource(R.string.dashboard_today),
             selected = selectedDay == DashboardTimetableDay.Today,
             onClick = onTodaySelected,
             modifier = Modifier.weight(1f),
         )
         DashboardTimetableDaySelectorItem(
-            label = "Jutro",
+            label = stringResource(R.string.dashboard_tomorrow),
             selected = selectedDay == DashboardTimetableDay.Tomorrow,
             onClick = onTomorrowSelected,
             modifier = Modifier.weight(1f),
@@ -504,9 +531,12 @@ private fun DashboardLessonRow(lesson: DashboardLesson) {
                 )
             }
         }
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.xxs)
+        ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(spacing.xs),
+                horizontalArrangement = Arrangement.spacedBy(spacing.xxs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -519,13 +549,23 @@ private fun DashboardLessonRow(lesson: DashboardLesson) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+//            Spacer(modifier = Modifier.height(spacing.xs))
             if (lesson.isCancelled) {
                 Text(
-                    text = "Odwołane",
+                    text = stringResource(R.string.dashboard_lesson_cancelled),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
             }
+            if (lesson.isSubstitution) {
+                Text(
+                    text = stringResource(R.string.dashboard_lesson_substitution),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            lesson.attendanceStatus?.let { DashboardAttendanceStatus(it) }
         }
         Text(
             text = lesson.room.orEmpty(),
@@ -537,50 +577,48 @@ private fun DashboardLessonRow(lesson: DashboardLesson) {
 }
 
 @Composable
-private fun AttendanceSection(
-    entries: List<DashboardAttendanceEntry>,
-    onOpenAttendance: () -> Unit,
-) {
-    DashboardSectionLayout(
-        title = "FREKWENCJA",
-        icon = Icons.Outlined.CheckCircle,
-        action = "Wszystkie",
-        onAction = onOpenAttendance,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.sm)) {
-            entries.forEach { entry ->
-                DashboardAttendanceRow(entry = entry)
-            }
-        }
+private fun DashboardAttendanceStatus(status: AttendanceStatus) {
+    val isPresent = status == AttendanceStatus.Present
+    val isLate = status == AttendanceStatus.Late || status == AttendanceStatus.ExcusedLate
+    val isAbsent = status == AttendanceStatus.Absent || status == AttendanceStatus.ExcusedAbsence ||
+        status == AttendanceStatus.SchoolRelatedAbsence
+    val color = when {
+        isAbsent -> MaterialTheme.colorScheme.error
+        isLate -> MaterialTheme.colorScheme.secondary
+        isPresent -> Color(0xFF3AB36C)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-}
-
-@Composable
-private fun DashboardAttendanceRow(entry: DashboardAttendanceEntry) {
+    val label = when (status) {
+        AttendanceStatus.Present -> stringResource(R.string.dashboard_attendance_present)
+        AttendanceStatus.Absent -> stringResource(R.string.dashboard_attendance_absent)
+        AttendanceStatus.ExcusedAbsence -> stringResource(R.string.dashboard_attendance_excused_absence)
+        AttendanceStatus.Late -> stringResource(R.string.dashboard_attendance_late)
+        AttendanceStatus.ExcusedLate -> stringResource(R.string.dashboard_attendance_excused_late)
+        AttendanceStatus.SchoolRelatedAbsence -> stringResource(R.string.dashboard_attendance_school_absence)
+        AttendanceStatus.Released -> stringResource(R.string.dashboard_attendance_released)
+        is AttendanceStatus.Unknown -> status.description ?: status.rawValue?.let {
+            stringResource(R.string.dashboard_attendance_unknown_value, it)
+        } ?: stringResource(R.string.dashboard_attendance_unknown)
+    }
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.sm),
+        horizontalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.xxs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = entry.startTime,
-            modifier = Modifier.width(48.dp),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Icon(
+            imageVector = when {
+                isLate -> Icons.Outlined.Schedule
+                isAbsent -> Icons.Outlined.Cancel
+                status is AttendanceStatus.Unknown -> Icons.AutoMirrored.Outlined.HelpOutline
+                else -> Icons.Outlined.CheckCircle
+            },
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = color,
         )
         Text(
-            text = entry.subject,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = entry.statusLabel,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = color,
         )
     }
 }
@@ -596,7 +634,7 @@ private fun GradesSection(
     DashboardSectionLayout(
         title = "NAJNOWSZE OCENY",
         icon = Icons.Outlined.Star,
-        action = "Wszystkie",
+        action = stringResource(R.string.dashboard_all),
         onAction = onOpenGrades,
     ) {
         SectionBody(
@@ -654,7 +692,11 @@ private fun DashboardGradeBadge(value: String) {
                 text = value,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
+                softWrap = true,
+                maxLines = Int.MAX_VALUE,
+                lineHeight = 16.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }
@@ -737,7 +779,7 @@ private fun SchoolTasksSection(
     DashboardSectionLayout(
         title = "SPRAWDZIANY I ZADANIA",
         icon = Icons.AutoMirrored.Outlined.Assignment,
-        action = "Wszystkie",
+        action = stringResource(R.string.dashboard_all),
         onAction = onOpenSchoolTasks,
     ) {
         SectionBody(
@@ -824,6 +866,7 @@ private fun DashboardSectionLayout(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
+                modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(spacing.sm)
             ) {
@@ -840,23 +883,33 @@ private fun DashboardSectionLayout(
                 )
             }
             if (action != null && onAction != null) {
-                TextButton(
-                    onClick = onAction,
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary
-                    ),
-                    colors = ButtonDefaults.textButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text(action)
-                }
-
+                DashboardTextLink(text = action, onClick = onAction)
             }
         }
         content()
+    }
+}
+
+@Composable
+internal fun DashboardTextLink(text: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clickable(role = Role.Button, onClick = onClick)
+            .minimumInteractiveComponentSize(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Icon(
+            imageVector = Icons.Outlined.ArrowOutward,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(11.dp),
+        )
     }
 }
 

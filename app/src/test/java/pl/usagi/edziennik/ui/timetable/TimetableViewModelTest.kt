@@ -13,6 +13,7 @@ import org.junit.Test
 import pl.usagi.edziennik.MainDispatcherRule
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.domain.SchoolDayOff
 import pl.usagi.edziennik.domain.TimetableEntry
 import pl.usagi.edziennik.domain.TimetableChange
 import pl.usagi.edziennik.domain.TimetableChangeKind
@@ -48,6 +49,110 @@ class TimetableViewModelTest {
     private val identity = LocalSnapshotIdentity(identityStore)
     private val snapshotStore = MemorySnapshotStore()
     private var widgetUpdates = 0
+
+    @Test fun emptyPlanAndNoDaysOffKeepExistingEmptyState() = runTest {
+        val viewModel = createViewModel(FakeTimetableRepository(), selectedStudentManager(), fixedClock())
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.showNoLessons)
+        assertTrue(viewModel.uiState.value.daysOff.isEmpty())
+    }
+
+    @Test fun emptyPlanStillShowsRestrictedDayOffUsingContextUnitId() = runTest {
+        val manager = selectedStudentManager()
+        manager.initialize(listOf(firstStudent.copy(organizationalUnitId = 1220)))
+        val repository = FakeTimetableRepository().apply { daysOff = listOf(dayOff("Wolne", 1220)) }
+        val viewModel = createViewModel(repository, manager, fixedClock())
+        advanceUntilIdle()
+        assertEquals(listOf("Wolne"), viewModel.uiState.value.daysOffFor(LocalDate.of(2026, 9, 9)).map { it.name })
+        assertTrue(viewModel.uiState.value.selectedDayEntries.isEmpty())
+        assertTrue(!viewModel.uiState.value.showNoLessons)
+        assertEquals(listOf(LocalDate.of(2026, 9, 7) to LocalDate.of(2026, 9, 11)), repository.daysOffRequests)
+    }
+
+    @Test fun multipleDaysOffRemainVisibleWithoutNoLessonsMessage() = runTest {
+        val repository = FakeTimetableRepository().apply {
+            daysOff = listOf(
+                dayOff("Dzień Edukacji Narodowej", 1220).copy(allUnits = true),
+                dayOff("Dzień szkoły", 1220).copy(allUnits = true),
+            )
+        }
+        val viewModel = createViewModel(repository, selectedStudentManager(), fixedClock())
+        advanceUntilIdle()
+        assertEquals(
+            listOf("Dzień Edukacji Narodowej", "Dzień szkoły"),
+            viewModel.uiState.value.daysOffFor(viewModel.uiState.value.selectedDate).map { it.name },
+        )
+        assertTrue(!viewModel.uiState.value.showNoLessons)
+    }
+
+    @Test fun dayOffDoesNotHideLessonsReturnedByApi() = runTest {
+        val repository = FakeTimetableRepository().apply {
+            daysOff = listOf(dayOff("Wolne", 1220).copy(allUnits = true))
+            entries = listOf(timetableEntry(LocalDate.of(2026, 9, 9)))
+        }
+        val viewModel = createViewModel(repository, selectedStudentManager(), fixedClock())
+        advanceUntilIdle()
+        assertEquals(1, viewModel.uiState.value.selectedDayEntries.size)
+        assertEquals(1, viewModel.uiState.value.daysOffFor(viewModel.uiState.value.selectedDate).size)
+    }
+
+    @Test fun changingStudentUsesNewContextUnitNotPreviousStudentsUnit() = runTest {
+        val manager = selectedStudentManager()
+        manager.initialize(listOf(firstStudent.copy(organizationalUnitId = 1220)))
+        val repository = FakeTimetableRepository().apply {
+            daysOff = listOf(dayOff("Pierwsza", 1220), dayOff("Druga", 999))
+        }
+        val viewModel = createViewModel(repository, manager, fixedClock())
+        advanceUntilIdle()
+        assertEquals(listOf("Pierwsza"), viewModel.uiState.value.daysOffFor(viewModel.uiState.value.selectedDate).map { it.name })
+        manager.setActiveStudent(secondStudent.copy(organizationalUnitId = 999))
+        advanceUntilIdle()
+        assertEquals(listOf("Druga"), viewModel.uiState.value.daysOffFor(viewModel.uiState.value.selectedDate).map { it.name })
+    }
+
+    @Test fun missingContextUnitShowsOnlyAllUnitsDays() = runTest {
+        val repository = FakeTimetableRepository().apply {
+            daysOff = listOf(dayOff("Ograniczony", 1220), dayOff("Wspólny", 1220).copy(allUnits = true))
+        }
+        val viewModel = createViewModel(repository, selectedStudentManager(), fixedClock())
+        advanceUntilIdle()
+        assertEquals(listOf("Wspólny"), viewModel.uiState.value.daysOffFor(viewModel.uiState.value.selectedDate).map { it.name })
+    }
+
+    @Test fun daysOffFailureDoesNotBlockPlanOrSnapshot() = runTest {
+        val repository = FakeTimetableRepository().apply {
+            daysOffFailure = IllegalStateException("test days off failure")
+            entries = listOf(timetableEntry(LocalDate.of(2026, 9, 9)))
+        }
+        val viewModel = createViewModel(repository, selectedStudentManager(), fixedClock())
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.daysOffFailed)
+        assertEquals(null, viewModel.uiState.value.errorMessage)
+        assertEquals(1, viewModel.uiState.value.selectedDayEntries.size)
+        assertEquals(1, widgetUpdates)
+    }
+
+    @Test fun lateDaysOffResponseCannotReplaceNewStudentsDays() = runTest {
+        val manager = selectedStudentManager()
+        var first: Continuation<List<SchoolDayOff>>? = null
+        var count = 0
+        val repository = object : TimetableRepository {
+            override suspend fun getTimetable(from: LocalDate, to: LocalDate) = emptyList<TimetableEntry>()
+            override suspend fun getDaysOff(from: LocalDate, to: LocalDate): List<SchoolDayOff> =
+                if (++count == 1) suspendCoroutine { first = it }
+                else listOf(dayOff("Nowe", 999).copy(allUnits = true))
+        }
+        val viewModel = createViewModel(repository, manager, fixedClock())
+        runCurrent()
+        manager.setActiveStudent(secondStudent.copy(organizationalUnitId = 999))
+        advanceUntilIdle()
+        first!!.resume(listOf(dayOff("Stare", 1220).copy(allUnits = true)))
+        advanceUntilIdle()
+        assertEquals(listOf("Nowe"), viewModel.uiState.value.daysOffFor(viewModel.uiState.value.selectedDate).map { it.name })
+    }
+
+    private fun dayOff(name: String, unit: Int) = SchoolDayOff(name, LocalDate.of(2026, 9, 9),
+        LocalDate.of(2026, 9, 9), false, setOf(unit))
 
     @Test
     fun successfulFetchFromScreenRedrawsWidgetAfterSavingSnapshot() = runTest {
@@ -118,7 +223,7 @@ class TimetableViewModelTest {
     }
 
     @Test
-    fun screenUpdatesSharedSnapshotSilentlyAndBackgroundStillDetectsLaterChanges() = runTest {
+    fun screenDetectsChangeAndBackgroundDoesNotRepeatIt() = runTest {
         val date = LocalDate.of(2026, 9, 9)
         val manager = selectedStudentManager()
         val scope = SnapshotScope(identity.currentAccountId()!!, identity.selectedStudentScopeId(),
@@ -144,7 +249,8 @@ class TimetableViewModelTest {
         advanceUntilIdle()
 
         assertTrue((localReader().read(date) as LocalTimetableResult.Available).lessons.single().cancelled)
-        assertTrue(snapshotStore.emittedEvents.isEmpty())
+        assertEquals(1, snapshotStore.emittedEvents.size)
+        assertTrue(snapshotStore.emittedEvents.single() is ChangeEvent.LessonCancelled)
         assertTrue(sync.sync(scope, SyncCompleteness.Complete, CurrentSnapshotData.Timetable(listOf(cancelled))).isEmpty())
         assertEquals(1, sync.sync(scope, SyncCompleteness.Complete,
             CurrentSnapshotData.Timetable(listOf(ordinary))).size)
@@ -420,6 +526,14 @@ class TimetableViewModelTest {
     }
 
     private class FakeTimetableRepository : TimetableRepository {
+        var daysOff: List<SchoolDayOff> = emptyList()
+        var daysOffFailure: Exception? = null
+        val daysOffRequests = mutableListOf<Pair<LocalDate, LocalDate>>()
+        override suspend fun getDaysOff(from: LocalDate, to: LocalDate): List<SchoolDayOff> {
+            daysOffRequests += from to to
+            daysOffFailure?.let { throw it }
+            return daysOff
+        }
         val requests = mutableListOf<Pair<LocalDate, LocalDate>>()
         var entries: List<TimetableEntry> = emptyList()
         var failure: Exception? = null

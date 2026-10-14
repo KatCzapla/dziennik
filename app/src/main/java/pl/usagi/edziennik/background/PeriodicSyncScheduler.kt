@@ -2,6 +2,7 @@ package pl.usagi.edziennik.background
 
 import android.content.Context
 import androidx.work.Constraints
+import androidx.work.BackoffPolicy
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
@@ -20,6 +21,7 @@ class PeriodicSyncScheduler @Inject constructor(
 ) : SyncScheduler {
     override fun schedule() {
         val request = PeriodicWorkRequestBuilder<SnapshotSyncWorker>(30, TimeUnit.MINUTES)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(

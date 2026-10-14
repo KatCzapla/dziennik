@@ -10,10 +10,10 @@ class ManualWidgetSyncRun @Inject constructor(
     private val syncRun: PeriodicSyncRun,
     private val widgetUpdater: WidgetUpdater,
 ) {
-    suspend fun run() {
+    suspend fun run(counters: SyncRunCounters = SyncRunCounters()): SyncRunResult {
         try {
             widgetUpdater.updateSafely()
-            syncRun.run()
+            return syncRun.run(counters)
         } finally {
             withContext(NonCancellable) {
                 widgetUpdater.updateSafely()

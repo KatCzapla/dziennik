@@ -44,6 +44,7 @@ class UonetAttendanceRepository @Inject constructor(
         ).classEntries
         val entries = classEntries.toDomainAttendance()
 
+        var excusesFailure: Exception? = null
         val (excuses, excusesComplete, excusesActive) = try {
             val response = dataSource.getExcuses(
                 studentKey = activeStudent.key,
@@ -55,11 +56,12 @@ class UonetAttendanceRepository @Inject constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
+            excusesFailure = failure
             Triple(emptyList<AttendanceExcuse>(), false, null)
         }
 
         return AttendanceFetchResult(
-            entries.withExcuses(excuses), excusesComplete, entries.size == classEntries.size, excusesActive,
+            entries.withExcuses(excuses), excusesComplete, entries.size == classEntries.size, excusesActive, excusesFailure,
         )
     }
 

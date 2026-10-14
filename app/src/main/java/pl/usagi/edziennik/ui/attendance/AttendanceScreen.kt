@@ -53,7 +53,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import kotlinx.coroutines.launch
 import pl.usagi.edziennik.domain.AttendanceEntry
 import pl.usagi.edziennik.domain.AttendanceStatus
-import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.time.WeekRange
 import pl.usagi.edziennik.domain.time.firstSelectableSchoolDate
 import pl.usagi.edziennik.domain.time.isSelectableSchoolDate
@@ -75,6 +74,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun AttendanceRoute(
     onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenExcuse: () -> Unit,
     viewModel: AttendanceViewModel = hiltViewModel(),
 ) {
@@ -88,7 +88,7 @@ fun AttendanceRoute(
         onNextWeek = viewModel::nextWeek,
         onToday = viewModel::today,
         onRetry = viewModel::retry,
-        onStudentSelected = viewModel::selectStudent,
+        onOpenSettings = onOpenSettings,
         onViewSelected = viewModel::selectView,
         onSubjectSelected = viewModel::selectSubject,
         onOpenExcuse = {
@@ -107,7 +107,7 @@ private fun AttendanceScreen(
     onNextWeek: () -> Unit,
     onToday: () -> Unit,
     onRetry: () -> Unit,
-    onStudentSelected: (Student) -> Unit,
+    onOpenSettings: () -> Unit,
     onViewSelected: (AttendanceView) -> Unit,
     onSubjectSelected: (Int) -> Unit,
     onOpenExcuse: () -> Unit,
@@ -146,9 +146,7 @@ private fun AttendanceScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             EDziennikTopBar(
-                activeStudent = state.activeStudent,
-                students = state.students,
-                onStudentSelected = onStudentSelected,
+                onOpenSettings = onOpenSettings,
                 showBack = true,
                 onBack = onBack,
             )

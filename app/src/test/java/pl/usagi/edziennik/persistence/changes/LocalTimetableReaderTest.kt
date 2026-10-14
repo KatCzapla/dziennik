@@ -29,8 +29,8 @@ class LocalTimetableReaderTest {
     private val identity = LocalSnapshotIdentity(identityStore)
     private val json = Json
 
-    @Test fun missingAccountHasNoBaseline() = runTest {
-        assertEquals(LocalTimetableResult.NoBaseline, reader().read(day))
+    @Test fun missingAccountIsLoggedOut() = runTest {
+        assertEquals(LocalTimetableResult.LoggedOut, reader().read(day))
         assertNull(store.lastReadScope)
     }
 
@@ -43,6 +43,12 @@ class LocalTimetableReaderTest {
     @Test fun missingSnapshotHasNoBaseline() = runTest {
         selectStudent()
         assertEquals(LocalTimetableResult.NoBaseline, reader().read(day))
+    }
+
+    @Test fun logoutDuringMissingSnapshotReadReturnsLoggedOut() = runTest {
+        selectStudent()
+        store.onRead = { identity.clearAccount() }
+        assertEquals(LocalTimetableResult.LoggedOut, reader().read(day))
     }
 
     @Test fun completeEmptyPlanIsAvailableNotMissing() = runTest {
@@ -186,9 +192,11 @@ class LocalTimetableReaderTest {
     private class MemorySnapshotStore : SnapshotStore {
         val payloads = mutableMapOf<String, String>()
         var lastReadScope: SnapshotScope? = null
+        var onRead: (() -> Unit)? = null
 
         override suspend fun read(scope: SnapshotScope): String? {
             lastReadScope = scope
+            onRead?.invoke()
             return payloads[scope.storageKey]
         }
 

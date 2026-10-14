@@ -25,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import pl.usagi.edziennik.R
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 
@@ -51,7 +53,7 @@ fun StudentSwitcher(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = activeStudent?.name ?: "UONET+",
+                text = activeStudent?.name ?: stringResource(R.string.student_switcher_fallback),
                 modifier = Modifier.weight(1f, fill = false),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -61,7 +63,7 @@ fun StudentSwitcher(
             if (canSwitch) {
                 Icon(
                     imageVector = Icons.Filled.KeyboardArrowDown,
-                    contentDescription = "Zmień ucznia",
+                    contentDescription = stringResource(R.string.student_switcher_change),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -95,7 +97,7 @@ fun StudentSwitcher(
                         {
                             Icon(
                                 imageVector = Icons.Filled.Check,
-                                contentDescription = "Aktualny uczeń",
+                                contentDescription = stringResource(R.string.student_switcher_current),
                             )
                         }
                     } else {

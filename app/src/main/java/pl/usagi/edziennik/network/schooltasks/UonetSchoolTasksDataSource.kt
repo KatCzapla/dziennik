@@ -103,7 +103,7 @@ sealed class SchoolTasksFetchException(
 ) : Exception(message, cause) {
     class Network(cause: Throwable) : SchoolTasksFetchException("Could not fetch UONET+ school tasks.", cause)
 
-    class Http(statusCode: Int) : SchoolTasksFetchException("UONET+ school tasks request failed with HTTP $statusCode.")
+    class Http(val statusCode: Int) : SchoolTasksFetchException("UONET+ school tasks request failed with HTTP $statusCode.")
 
     data object UnexpectedResponse : SchoolTasksFetchException("UONET+ school tasks response did not match the expected contract.")
 }

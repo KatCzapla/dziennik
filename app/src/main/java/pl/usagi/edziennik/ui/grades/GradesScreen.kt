@@ -54,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,7 +62,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import pl.usagi.edziennik.domain.ClassificationPeriod
 import pl.usagi.edziennik.domain.Grade
 import pl.usagi.edziennik.domain.GradeColumn
-import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.SubjectGrades
 import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.components.EmptyState
@@ -74,6 +74,7 @@ import kotlin.text.isNotBlank
 @Composable
 fun GradesRoute(
     onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenSubject: (Int) -> Unit,
     onOpenTarget: (GradeNavigationTarget) -> Unit,
     viewModel: GradesViewModel = hiltViewModel(),
@@ -88,7 +89,7 @@ fun GradesRoute(
         onBack = onBack,
         onPeriodSelected = viewModel::selectPeriod,
         onRetry = viewModel::retry,
-        onStudentSelected = viewModel::selectStudent,
+        onOpenSettings = onOpenSettings,
         onOpenSubject = onOpenSubject,
     )
 }
@@ -117,7 +118,7 @@ private fun GradesScreen(
     onBack: () -> Unit,
     onPeriodSelected: (ClassificationPeriod) -> Unit,
     onRetry: () -> Unit,
-    onStudentSelected: (Student) -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenSubject: (Int) -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
@@ -126,9 +127,7 @@ private fun GradesScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             EDziennikTopBar(
-                activeStudent = state.activeStudent,
-                students = state.students,
-                onStudentSelected = onStudentSelected,
+                onOpenSettings = onOpenSettings,
                 showBack = true,
                 onBack = onBack,
             )
@@ -476,10 +475,13 @@ private fun GradesSubjectScreen(
 ) {
     val spacing = EDziennikTheme.spacing
     val listState = rememberLazyListState()
+    val grades = subject?.gradesByDate().orEmpty()
     var targetShown by rememberSaveable(targetColumnId, targetGradeIndex) { mutableStateOf(false) }
-    LaunchedEffect(subject?.position, targetColumnId) {
-        val index = subject?.columns?.indexOfFirst { it.id == targetColumnId } ?: -1
-        if (index >= 0 && !targetShown) listState.scrollToItem(index + 2)
+    LaunchedEffect(subject?.position, grades, targetColumnId, targetGradeIndex) {
+        val hasTarget = grades.any { (column, grade) ->
+            column.id == targetColumnId && grade.index == targetGradeIndex
+        }
+        if (hasTarget && !targetShown) listState.scrollToItem(2)
     }
 
     Scaffold(
@@ -541,7 +543,7 @@ private fun GradesSubjectScreen(
                 )
             }
 
-            if (subject.columns.isEmpty()) {
+            if (grades.isEmpty()) {
                 item {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -557,14 +559,12 @@ private fun GradesSubjectScreen(
                     }
                 }
             } else {
-                items(
-                    items = subject.columns,
-                    key = { column -> column.id },
-                ) { column ->
-                    GradeColumnSection(
-                        column = column,
+                item {
+                    SubjectGradesSection(
+                        grades = grades,
                         includeGradeWeight = subject.includeGradeWeight,
-                        targetGradeIndex = targetGradeIndex.takeIf { targetColumnId == column.id && !targetShown },
+                        targetColumnId = targetColumnId,
+                        targetGradeIndex = targetGradeIndex.takeIf { !targetShown },
                         onTargetShown = { targetShown = true },
                     )
                 }
@@ -730,50 +730,42 @@ private fun AverageAndPoints(subject: SubjectGrades) {
 }
 
 @Composable
-private fun GradeColumnSection(
-    column: GradeColumn,
+private fun SubjectGradesSection(
+    grades: List<Pair<GradeColumn, IndexedValue<Grade>>>,
     includeGradeWeight: Boolean,
+    targetColumnId: Int?,
     targetGradeIndex: Int?,
     onTargetShown: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
-    val grades = column.grades.withIndex().sortedByDescending { it.value.date }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(spacing.md),
     ) {
 
-        if (grades.isEmpty()) {
-            Text(
-                text = "Brak ocen",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        grades.forEachIndexed { index, (column, indexedGrade) ->
+            val requester = remember { BringIntoViewRequester() }
+            LaunchedEffect(targetColumnId, targetGradeIndex) {
+                if (targetColumnId == column.id && targetGradeIndex == indexedGrade.index) {
+                    withFrameNanos { }
+                    requester.bringIntoView()
+                    onTargetShown()
+                }
+            }
+            GradeDetailsRow(
+                name = column.name,
+                category = column.category,
+                grade = indexedGrade.value,
+                includeGradeWeight = includeGradeWeight,
+                modifier = Modifier.bringIntoViewRequester(requester),
             )
-        } else {
-            grades.forEachIndexed { index, indexedGrade ->
-                val requester = remember { BringIntoViewRequester() }
-                LaunchedEffect(targetGradeIndex) {
-                    if (targetGradeIndex == indexedGrade.index) {
-                        withFrameNanos { }
-                        requester.bringIntoView()
-                        onTargetShown()
-                    }
-                }
-                GradeDetailsRow(
-                    name = column.name,
-                    category = column.category,
-                    grade = indexedGrade.value,
-                    includeGradeWeight = includeGradeWeight,
-                    modifier = Modifier.bringIntoViewRequester(requester),
-                )
 
-                if (index != grades.lastIndex) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 56.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                    )
-                }
+            if (index != grades.lastIndex) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 56.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
             }
         }
     }
@@ -797,6 +789,12 @@ private fun GradeValueBadge(
                 fontWeight = FontWeight.Bold,
             ),
             color = MaterialTheme.colorScheme.onSecondaryContainer,
+            fontWeight = FontWeight.SemiBold,
+            softWrap = true,
+            maxLines = Int.MAX_VALUE,
+            lineHeight = 16.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }

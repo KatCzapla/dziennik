@@ -30,6 +30,110 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 
 class DashboardPresentationTest {
+    private val matchingDate = LocalDate.of(2026, 9, 14)
+
+    private fun presentedLessons(vararg entries: TimetableEntry) = entries.toList().toDashboardLessons(
+        matchingDate, LocalDateTime.of(matchingDate, LocalTime.of(7, 0)),
+    )
+
+    @Test fun attendanceMatchesExactSlotNotSubjectName() {
+        val lessons = presentedLessons(lesson(matchingDate))
+        val attendance = listOf(attendanceEntry(matchingDate, LocalTime.of(8, 20), "Inny przedmiot",
+            AttendanceStatus.Absent)).toDashboardAttendanceEntries(matchingDate)
+        assertEquals(AttendanceStatus.Absent, lessons.withAttendance(attendance).single().attendanceStatus)
+    }
+
+    @Test fun missingAttendanceIsNotPresence() {
+        assertEquals(null, presentedLessons(lesson(matchingDate)).withAttendance(emptyList()).single().attendanceStatus)
+    }
+
+    @Test fun repeatedSubjectLessonsKeepSeparateAbsentAndLateStatuses() {
+        val lessons = presentedLessons(lesson(matchingDate), lesson(matchingDate, LocalTime.of(9, 15)))
+        val attendance = listOf(
+            attendanceEntry(matchingDate, LocalTime.of(9, 15), status = AttendanceStatus.Late),
+            attendanceEntry(matchingDate, LocalTime.of(8, 20), status = AttendanceStatus.Absent),
+        ).toDashboardAttendanceEntries(matchingDate)
+        assertEquals(listOf(AttendanceStatus.Absent, AttendanceStatus.Late),
+            lessons.withAttendance(attendance).map { it.attendanceStatus })
+    }
+
+    @Test fun ambiguousParallelLessonsDoNotReceiveAttendance() {
+        val lessons = presentedLessons(lesson(matchingDate), lesson(matchingDate, subject = "Historia"))
+        val attendance = listOf(attendanceEntry(matchingDate, LocalTime.of(8, 20)))
+            .toDashboardAttendanceEntries(matchingDate)
+        assertTrue(lessons.withAttendance(attendance).all { it.attendanceStatus == null })
+    }
+
+    @Test fun duplicateAttendanceDoesNotSelectArbitraryStatus() {
+        val attendance = listOf(AttendanceStatus.Absent, AttendanceStatus.Present).map {
+            attendanceEntry(matchingDate, LocalTime.of(8, 20), status = it)
+        }.toDashboardAttendanceEntries(matchingDate)
+        assertEquals(null, presentedLessons(lesson(matchingDate)).withAttendance(attendance).single().attendanceStatus)
+    }
+
+    @Test fun differentDayOrEndTimeDoesNotMatch() {
+        val lessons = presentedLessons(lesson(matchingDate))
+        val entry = attendanceEntry(matchingDate, LocalTime.of(8, 20))
+        listOf(entry.copy(date = matchingDate.plusDays(1)), entry.copy(endTime = LocalTime.of(9, 10))).forEach {
+            assertEquals(null, lessons.withAttendance(listOf(it).toDashboardAttendanceEntries(it.date))
+                .single().attendanceStatus)
+        }
+    }
+
+    @Test fun cancellationAndSubstitutionMarkersSurviveAttendanceMatching() {
+        val cancelled = cancelledLesson(matchingDate)
+        val substituted = lesson(matchingDate, LocalTime.of(9, 15)).copy(
+            changes = cancelled.changes.map { it.copy(kind = TimetableChangeKind.Substitution, changeType = 7) },
+        )
+        val lessons = presentedLessons(cancelled, substituted).withAttendance(listOf(
+            attendanceEntry(matchingDate, LocalTime.of(8, 20), status = AttendanceStatus.Absent),
+            attendanceEntry(matchingDate, LocalTime.of(9, 15)),
+        ).toDashboardAttendanceEntries(matchingDate))
+        assertTrue(lessons[0].isCancelled)
+        assertTrue(lessons[1].isSubstitution)
+        assertEquals(AttendanceStatus.Absent, lessons[0].attendanceStatus)
+        assertEquals(AttendanceStatus.Present, lessons[1].attendanceStatus)
+    }
+
+    @Test fun switchingToTomorrowNeverReusesTodayAttendance() {
+        val state = DashboardUiState(
+            today = matchingDate,
+            todayTimetable = DashboardSection(data = presentedLessons(lesson(matchingDate))),
+            tomorrowTimetable = DashboardSection(data = listOf(lesson(matchingDate.plusDays(1))).toDashboardLessons(
+                matchingDate.plusDays(1), LocalDateTime.of(matchingDate, LocalTime.of(7, 0)),
+            )),
+            todayAttendance = DashboardSection(data = listOf(
+                attendanceEntry(matchingDate, LocalTime.of(8, 20), status = AttendanceStatus.Absent),
+            ).toDashboardAttendanceEntries(matchingDate)),
+        )
+        assertEquals(AttendanceStatus.Absent, state.selectedTimetable.data!!.single().attendanceStatus)
+        assertEquals(null, state.copy(selectedTimetableDay = DashboardTimetableDay.Tomorrow)
+            .selectedTimetable.data!!.single().attendanceStatus)
+        assertEquals(AttendanceStatus.Absent, state.selectedTimetable.data!!.single().attendanceStatus)
+    }
+
+    @Test fun dayOffWithoutLessonsHasNoAttendanceRowsOrNoLessonsMessage() {
+        val state = DashboardUiState(
+            today = matchingDate,
+            todayTimetable = DashboardSection(data = emptyList()),
+            daysOff = listOf(pl.usagi.edziennik.domain.SchoolDayOff("Wolne", matchingDate, matchingDate, true, emptySet())),
+            todayAttendance = DashboardSection(data = listOf(
+                attendanceEntry(matchingDate, LocalTime.of(8, 20)),
+            ).toDashboardAttendanceEntries(matchingDate)),
+        )
+        assertTrue(state.selectedTimetable.data!!.isEmpty())
+        assertFalse(state.showNoLessons)
+    }
+
+    @Test fun failedAttendanceDoesNotPublishStaleStatus() {
+        val state = DashboardUiState(today = matchingDate,
+            todayTimetable = DashboardSection(data = presentedLessons(lesson(matchingDate))),
+            todayAttendance = DashboardSection(errorMessage = "Błąd", data = listOf(
+                attendanceEntry(matchingDate, LocalTime.of(8, 20)),
+            ).toDashboardAttendanceEntries(matchingDate)))
+        assertEquals(null, state.selectedTimetable.data!!.single().attendanceStatus)
+    }
+
     @Test
     fun informationDateUsesFullMonthWithoutYearInFirstLine() {
         val september = LocalDate.of(2026, 9, 7)

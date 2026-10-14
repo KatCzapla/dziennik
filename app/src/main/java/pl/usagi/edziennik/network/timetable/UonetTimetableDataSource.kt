@@ -5,12 +5,22 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import pl.usagi.edziennik.dto.TimetableEntryDto
+import pl.usagi.edziennik.dto.SchoolDayOffDto
 import pl.usagi.edziennik.network.UonetApiClient
 import javax.inject.Inject
 
 class UonetTimetableDataSource @Inject constructor(
     private val apiClient: UonetApiClient,
 ) {
+    suspend fun getDaysOff(studentKey: String, dateFrom: String, dateTo: String): List<SchoolDayOffDto> =
+        withContext(Dispatchers.IO) {
+            val url = API_URL.toHttpUrl().newBuilder().addPathSegment("DniWolne")
+                .addQueryParameter("key", studentKey)
+                .addQueryParameter("dataOd", dateFrom)
+                .addQueryParameter("dataDo", dateTo).build()
+            apiClient.get(url, ListSerializer(SchoolDayOffDto.serializer()))
+        }
+
     suspend fun getTimetable(
         studentKey: String,
         dateFrom: String,
@@ -48,7 +58,7 @@ sealed class TimetableFetchException(
 ) : Exception(message, cause) {
     class Network(cause: Throwable) : TimetableFetchException("Could not fetch UONET+ timetable.", cause)
 
-    class Http(statusCode: Int) : TimetableFetchException("UONET+ timetable request failed with HTTP $statusCode.")
+    class Http(val statusCode: Int) : TimetableFetchException("UONET+ timetable request failed with HTTP $statusCode.")
 
     data object UnexpectedResponse : TimetableFetchException("UONET+ timetable response did not match the expected contract.")
 }

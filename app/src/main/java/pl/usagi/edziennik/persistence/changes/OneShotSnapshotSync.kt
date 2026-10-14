@@ -34,6 +34,8 @@ enum class SyncIssue { PARTIAL, FAILED }
 data class OneShotSyncResult(
     val events: List<ChangeEvent>,
     val issues: Map<SnapshotArea, SyncIssue>,
+    val failureCauses: Map<SnapshotArea, SyncFailureCause> = emptyMap(),
+    val successfulAreas: Set<SnapshotArea> = SnapshotArea.entries.filter { issues[it] != SyncIssue.FAILED }.toSet(),
 )
 
 interface SnapshotSynchronizer {
@@ -55,28 +57,38 @@ class OneShotSnapshotSync @Inject constructor(
 ) : SnapshotSynchronizer {
     override suspend fun syncOnce(): OneShotSyncResult {
         val accountId = identity.currentAccountId()
-            ?: return OneShotSyncResult(emptyList(), SnapshotArea.entries.associateWith { SyncIssue.FAILED })
+            ?: return OneShotSyncResult(emptyList(), SnapshotArea.entries.associateWith { SyncIssue.FAILED },
+                SnapshotArea.entries.associateWith { SyncFailureCause.UNAVAILABLE }, emptySet())
         val student = activeStudentManager.activeStudent.value
         val events = mutableListOf<ChangeEvent>()
         val issues = mutableMapOf<SnapshotArea, SyncIssue>()
+        val causes = mutableMapOf<SnapshotArea, SyncFailureCause>()
+        val successful = mutableSetOf<SnapshotArea>()
 
         suspend fun area(area: SnapshotArea, block: suspend () -> AreaResult) {
             try {
                 val result = block()
+                successful += area
                 events += result.events
                 result.issue?.let { if (issues[area] != SyncIssue.FAILED) issues[area] = it }
+                result.cause?.let { if (causes[area]?.retryable != true) causes[area] = it }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (failure: Exception) {
                 issues[area] = SyncIssue.FAILED
+                val cause = failure.syncFailureCause()
+                if (causes[area]?.retryable != true) causes[area] = cause
             }
         }
 
         area(SnapshotArea.MESSAGES) { syncMessages(accountId) }
 
         if (student == null) {
-            SnapshotArea.entries.filter { it != SnapshotArea.MESSAGES }.forEach { issues[it] = SyncIssue.FAILED }
-            return OneShotSyncResult(events, issues)
+            SnapshotArea.entries.filter { it != SnapshotArea.MESSAGES }.forEach {
+                issues[it] = SyncIssue.FAILED
+                causes[it] = SyncFailureCause.UNAVAILABLE
+            }
+            return OneShotSyncResult(events, issues, causes, successful)
         }
 
         val studentId = identity.studentScopeId(student.diaryId)
@@ -125,7 +137,7 @@ class OneShotSnapshotSync @Inject constructor(
                     SnapshotScope(accountId, studentId, SnapshotArea.ATTENDANCE, range),
                     completeness,
                     CurrentSnapshotData.Attendance(fetched.entries),
-                ), if (complete) null else SyncIssue.PARTIAL)
+                ), if (complete) null else SyncIssue.PARTIAL, fetched.excusesFailure?.syncFailureCause())
             }
 
         }
@@ -138,13 +150,15 @@ class OneShotSnapshotSync @Inject constructor(
                 val keys = tasks.mapTo(mutableSetOf()) { TaskKey(it.rawType, it.id) }
                 val failedDetails = fetched.failedDetailKeys.intersect(keys)
                 val complete = failedDetails.isEmpty()
+                val detailCauses = failedDetails.mapNotNull { fetched.detailFailures[it]?.syncFailureCause() }
                 val completeness = if (complete) SyncCompleteness.Complete
                 else SyncCompleteness.Partial(mainListComplete = true, failedTaskDetails = failedDetails)
                 AreaResult(snapshotSyncManager.sync(
                     SnapshotScope(accountId, studentId, SnapshotArea.TASKS, taskWeek.scopeRange),
                     completeness,
                     CurrentSnapshotData.Tasks(tasks, calendarRangeComplete = true),
-                ), if (complete) null else SyncIssue.PARTIAL)
+                ), if (complete) null else SyncIssue.PARTIAL,
+                    detailCauses.firstOrNull { it.retryable } ?: detailCauses.firstOrNull())
             }
         }
 
@@ -168,7 +182,7 @@ class OneShotSnapshotSync @Inject constructor(
             ))
         }
 
-        return OneShotSyncResult(events, issues)
+        return OneShotSyncResult(events, issues, causes, successful)
     }
 
     private suspend fun syncMessages(accountId: LocalAccountId): AreaResult {
@@ -184,7 +198,7 @@ class OneShotSnapshotSync @Inject constructor(
                 throw cancelled
             } catch (failure: Exception) {
                 if (pageIndex == 0) throw failure
-                return AreaResult(emptyList(), SyncIssue.PARTIAL)
+                return AreaResult(emptyList(), SyncIssue.PARTIAL, failure.syncFailureCause())
             }
             if (page.messages.isEmpty() && !page.endReached) return AreaResult(emptyList(), SyncIssue.PARTIAL)
             messages += page.messages
@@ -217,7 +231,11 @@ class OneShotSnapshotSync @Inject constructor(
         }
     }
 
-    private data class AreaResult(val events: List<ChangeEvent>, val issue: SyncIssue? = null)
+    private data class AreaResult(
+        val events: List<ChangeEvent>,
+        val issue: SyncIssue? = null,
+        val cause: SyncFailureCause? = null,
+    )
 
     private companion object {
         const val MAX_MESSAGE_PAGES = 5

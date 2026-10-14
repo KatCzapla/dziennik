@@ -35,13 +35,9 @@ class ManualWidgetSyncRunTest {
     }
 
     @Test fun syncFailureClearsRefreshingAndRedrawsSavedData() = runTest {
-        try {
-            runner { error("Sync failed") }.run()
-            error("Expected failure")
-        } catch (failure: IllegalStateException) {
-            assertEquals("Sync failed", failure.message)
-            assertEquals(2, updates)
-        }
+        val result = runner { error("Sync failed") }.run()
+        assertEquals(SyncRunStatus.FAILED, result.status)
+        assertEquals(2, updates)
     }
 
     @Test fun cancellationAlsoClearsRefreshing() = runTest {
@@ -74,11 +70,16 @@ class ManualWidgetSyncRunTest {
 
     private fun runner(available: Boolean = true, block: suspend () -> OneShotSyncResult): ManualWidgetSyncRun {
         val session = SyncSession { prepareCalls++; available }
+        val pending = mutableListOf<ChangeEvent>()
         val sync = object : SnapshotSynchronizer {
-            override suspend fun syncOnce(): OneShotSyncResult { syncCalls++; return block() }
+            override suspend fun syncOnce(): OneShotSyncResult {
+                syncCalls++
+                return block().also { pending += it.events }
+            }
         }
-        val notifier = object : ChangeNotifier {
-            override fun publish(events: List<ChangeEvent>) { published += events }
+        val notifier = PendingNotificationPublisher {
+            published += pending
+            pending.clear()
         }
         return ManualWidgetSyncRun(PeriodicSyncRun(session, sync, notifier), updater)
     }

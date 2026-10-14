@@ -15,6 +15,15 @@ import java.time.LocalTime
 import java.time.ZoneId
 
 class TodayTimetablePresentationTest {
+    @Test fun loggedOutClearsLessonsAndSynchronizationInfo() {
+        val shown = presentTodayTimetable(LocalTimetableResult.LoggedOut,
+            LocalDate.of(2026, 10, 12), ZoneId.of("Europe/Warsaw"))
+        assertEquals("Zaloguj się, aby zobaczyć plan lekcji", shown.message)
+        assertTrue(shown.isLoggedOut)
+        assertTrue(shown.lessons.isEmpty())
+        assertNull(shown.lastCompleteLabel)
+    }
+
     private val today = LocalDate.of(2026, 10, 7)
     private val zone = ZoneId.of("Europe/Warsaw")
 

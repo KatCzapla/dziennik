@@ -56,6 +56,7 @@ class UonetAttendanceRepositoryTest {
         val result = repository(excusesHttpStatus = 503).getAttendanceWithCompleteness(weekStart, weekEnd)
 
         assertEquals(false, result.excusesComplete)
+        assertEquals(503, (result.excusesFailure as pl.usagi.edziennik.network.attendance.AttendanceFetchException.Http).statusCode)
         assertEquals(1, result.entries.size)
         assertNull(result.entries.single().excuseStatus)
     }

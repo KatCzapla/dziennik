@@ -17,8 +17,29 @@ import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.serialization.json.Json
+import pl.usagi.edziennik.network.UonetApiClient
+import pl.usagi.edziennik.network.context.UonetContextDataSource
+import pl.usagi.edziennik.repository.UonetStudentRepository
 
 class EduVulcanAuthenticationTest {
+    @Test fun realAuthenticationClassAndContextMappingAcceptOptionalUnitIdLocally() = runTest {
+        for (field in listOf("", ",\"idJednostkaSkladowa\":null", ",\"idJednostkaSkladowa\":1220")) {
+            val body = """{"uczniowie":[{"key":"runtime","idDziennik":1,"uczen":"Uczeń","oddzial":"1A","jednostka":"Szkoła"$field}]}"""
+            val requests = mutableListOf<Request>()
+            val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+            val client = scriptedClient(requests, contextBody = body)
+            val result = EduVulcanLogin(client, json).authenticate("test", "test")
+            assertTrue(result is EduVulcanLoginResult.Authenticated)
+            val students = UonetStudentRepository(UonetContextDataSource(
+                UonetApiClient((result as EduVulcanLoginResult.Authenticated).client, json))).getStudents()
+            assertEquals(1, students.size)
+            assertEquals(if (field.contains("1220")) 1220 else null, students.single().organizationalUnitId)
+            assertEquals(2, requests.count { it.url.encodedPath == "/lublin/api/Context" })
+            assertTrue(requests.none { it.url.encodedPath.endsWith("DniWolne") })
+        }
+    }
+
     @Test
     fun authenticatedClientUsesPersistentCookieJar() = runTest {
         val persistentCookies = RecordingCookieJar()

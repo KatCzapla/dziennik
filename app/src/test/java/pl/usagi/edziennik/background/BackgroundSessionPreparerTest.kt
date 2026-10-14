@@ -17,6 +17,9 @@ import pl.usagi.edziennik.network.session.AutoDetectLogin
 import pl.usagi.edziennik.network.session.AutoLoginSettings
 import pl.usagi.edziennik.network.session.CurrentAuthenticationSession
 import pl.usagi.edziennik.network.session.SessionManager
+import pl.usagi.edziennik.network.session.SessionCheck
+import pl.usagi.edziennik.network.session.AuthenticationException
+import kotlinx.coroutines.CancellationException
 import pl.usagi.edziennik.persistence.changes.LocalIdentityStore
 import pl.usagi.edziennik.persistence.changes.LocalSnapshotIdentity
 import pl.usagi.edziennik.persistence.changes.OneShotSyncResult
@@ -124,6 +127,94 @@ class BackgroundSessionPreparerTest {
         assertFalse(fixture.preparer.isCurrent())
     }
 
+    @Test fun transportFailureDuringVerificationDoesNotClearCookiesOrLogIn() = runTest {
+        val fixture = Fixture(checkResults = mutableListOf(SessionCheck.TRANSPORT_ERROR))
+        val result = fixture.runSync()
+        assertTrue(result.retryable)
+        assertEquals("SESSION_TRANSPORT_ERROR", result.reason)
+        assertEquals(0, fixture.sessionClears)
+        assertEquals(0, fixture.projectLoginCalls + fixture.eduLoginCalls)
+        assertEquals(0, fixture.sync.calls)
+    }
+
+    @Test fun serverFailureDuringVerificationDoesNotTriggerAutoLogin() = runTest {
+        val fixture = Fixture(checkResults = mutableListOf(SessionCheck.SERVER_ERROR))
+        assertEquals("SESSION_SERVER_ERROR", fixture.runSync().reason)
+        assertEquals(0, fixture.sessionClears)
+        assertEquals(0, fixture.projectLoginCalls + fixture.eduLoginCalls)
+    }
+
+    @Test fun transientAutoLoginFailureRetriesWithoutFallbackForBothProviders() = runTest {
+        AuthenticationProvider.entries.forEach { provider ->
+            val fixture = Fixture(provider = provider, transientLoginFailure = true)
+            val before = fixture.sync.baseline
+            val result = fixture.runSync()
+            assertEquals("LOGIN_TRANSIENT_ERROR", result.reason)
+            assertTrue(result.retryable)
+            assertEquals(1, fixture.projectLoginCalls + fixture.eduLoginCalls)
+            assertEquals(0, fixture.sync.calls)
+            assertEquals(before, fixture.sync.baseline)
+        }
+    }
+
+    @Test fun rejectedCredentialsDisableFurtherAutomaticLoginAttempts() = runTest {
+        AuthenticationProvider.entries.forEach { provider ->
+            val fixture = Fixture(provider = provider, invalidCredentials = true)
+            assertEquals("LOGIN_REJECTED", fixture.runSync().reason)
+            val second = fixture.runSync()
+            assertEquals("AUTO_LOGIN_DISABLED", second.reason)
+            assertFalse(second.retryable)
+            assertEquals(1, fixture.projectLoginCalls + fixture.eduLoginCalls)
+            assertEquals(0, fixture.sync.calls)
+        }
+    }
+
+    @Test fun unavailableAutoLoginConditionsDoNotRetry() = runTest {
+        val cases = listOf(
+            Fixture(autoLoginEnabled = false) to "AUTO_LOGIN_DISABLED",
+            Fixture(storedCredentials = null) to "MISSING_CREDENTIALS",
+            Fixture(provider = null) to "MISSING_PROVIDER",
+        )
+        cases.forEach { (fixture, reason) ->
+            val result = fixture.runSync()
+            assertEquals(reason, result.reason)
+            assertFalse(result.retryable)
+            assertEquals(0, fixture.projectLoginCalls + fixture.eduLoginCalls)
+        }
+    }
+
+    @Test fun expiredSessionWithSuccessfulLoginReturnsCompleteResult() = runTest {
+        val fixture = Fixture()
+        assertEquals(SyncRunStatus.COMPLETE, fixture.runSync().status)
+        assertEquals(1, fixture.sync.calls)
+    }
+
+    @Test fun transportFailureAfterLoginRetainsRenewedSessionForRetry() = runTest {
+        val fixture = Fixture(checkResults = mutableListOf(SessionCheck.EXPIRED, SessionCheck.TRANSPORT_ERROR))
+        assertTrue(fixture.runSync().retryable)
+        assertEquals(1, fixture.sessionClears)
+        assertEquals(AuthenticationProvider.PROJECT_UONET, fixture.currentSession.provider)
+        assertEquals(0, fixture.sync.calls)
+    }
+
+    @Test fun cancelledSessionVerificationIsPropagated() = runTest {
+        val fixture = Fixture(checkException = CancellationException())
+        var cancelled = false
+        try { fixture.runSync() } catch (_: CancellationException) { cancelled = true }
+        assertTrue(cancelled)
+        assertEquals(0, fixture.projectLoginCalls + fixture.eduLoginCalls)
+        assertEquals(0, fixture.sync.calls)
+    }
+
+    @Test fun malformedVerificationResponseDoesNotPretendSessionExpired() = runTest {
+        val fixture = Fixture(checkResults = mutableListOf(SessionCheck.INVALID_RESPONSE))
+        val result = fixture.runSync()
+        assertEquals("SESSION_INVALID_RESPONSE", result.reason)
+        assertFalse(result.retryable)
+        assertEquals(0, fixture.sessionClears)
+        assertEquals(0, fixture.projectLoginCalls + fixture.eduLoginCalls)
+    }
+
     private class Fixture(
         private val provider: AuthenticationProvider? = AuthenticationProvider.PROJECT_UONET,
         private val autoLoginEnabled: Boolean = true,
@@ -131,6 +222,10 @@ class BackgroundSessionPreparerTest {
         initiallyValid: Boolean = false,
         private val loginSucceeds: Boolean = true,
         private val sessionValidAfterLogin: Boolean = true,
+        private val checkResults: MutableList<SessionCheck> = mutableListOf(),
+        private val checkException: Exception? = null,
+        private val transientLoginFailure: Boolean = false,
+        private val invalidCredentials: Boolean = false,
     ) {
         private val identityStore = object : LocalIdentityStore {
             private val values = mutableMapOf<String, String>()
@@ -149,9 +244,10 @@ class BackgroundSessionPreparerTest {
             override suspend fun clear() { saved = null }
             override suspend fun hasCredentials(): Boolean = saved != null
         }
+        private var enabled = autoLoginEnabled
         private val settings = object : AutoLoginSettings {
-            override suspend fun isAutoLoginEnabled() = autoLoginEnabled
-            override suspend fun setAutoLoginEnabled(enabled: Boolean) = Unit
+            override suspend fun isAutoLoginEnabled() = enabled
+            override suspend fun setAutoLoginEnabled(enabled: Boolean) { this@Fixture.enabled = enabled }
             override suspend fun getAuthenticationProvider() = provider
             override suspend fun setAuthenticationProvider(provider: AuthenticationProvider?) = Unit
         }
@@ -161,6 +257,11 @@ class BackgroundSessionPreparerTest {
             override suspend fun login(username: String, password: String): Result<Unit> =
                 error("Direct login is not used by this test")
             override suspend fun isSessionValid() = valid
+            override suspend fun checkSession(): SessionCheck {
+                checkException?.let { throw it }
+                return if (checkResults.isNotEmpty()) checkResults.removeAt(0)
+                else if (valid) SessionCheck.VALID else SessionCheck.EXPIRED
+            }
             override suspend fun validatePersistedSession() = valid
             override suspend fun clearSession() {
                 sessionClears++
@@ -173,14 +274,18 @@ class BackgroundSessionPreparerTest {
         private val login = AutoDetectLogin(
             authenticateEduVulcan = { _, _ ->
                 eduLoginCalls++
-                if (loginSucceeds) {
+                if (transientLoginFailure) EduVulcanLoginResult.TransientError
+                else if (invalidCredentials) EduVulcanLoginResult.InvalidCredentials
+                else if (loginSucceeds) {
                     valid = sessionValidAfterLogin
                     EduVulcanLoginResult.Authenticated(OkHttpClient())
                 } else EduVulcanLoginResult.InvalidCredentials
             },
             loginProjectUonet = { _, _ ->
                 projectLoginCalls++
-                if (loginSucceeds) {
+                if (transientLoginFailure) Result.failure(AuthenticationException.Network(java.io.IOException()))
+                else if (invalidCredentials) Result.failure(AuthenticationException.InvalidCredentials())
+                else if (loginSucceeds) {
                     valid = sessionValidAfterLogin
                     Result.success(Unit)
                 } else Result.failure(IllegalStateException("Authentication failed"))
@@ -200,11 +305,7 @@ class BackgroundSessionPreparerTest {
         )
         val sync = RecordingSync()
 
-        suspend fun runSync() {
-            PeriodicSyncRun(preparer, sync, object : ChangeNotifier {
-                override fun publish(events: List<ChangeEvent>) = Unit
-            }).run()
-        }
+        suspend fun runSync() = PeriodicSyncRun(preparer, sync, PendingNotificationPublisher { }).run()
     }
 
     private class RecordingSync : SnapshotSynchronizer {

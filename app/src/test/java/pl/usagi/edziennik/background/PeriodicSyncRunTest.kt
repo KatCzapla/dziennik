@@ -1,35 +1,55 @@
 package pl.usagi.edziennik.background
 
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import pl.usagi.edziennik.domain.AttendanceStatus
-import pl.usagi.edziennik.domain.changes.AttendanceKey
-import pl.usagi.edziennik.domain.changes.ChangeEvent
 import pl.usagi.edziennik.domain.changes.SnapshotArea
 import pl.usagi.edziennik.persistence.changes.OneShotSyncResult
 import pl.usagi.edziennik.persistence.changes.SnapshotSynchronizer
 import pl.usagi.edziennik.persistence.changes.SyncIssue
-import java.time.LocalDate
 
 class PeriodicSyncRunTest {
+    @Test fun countsDetectedEventsAndSuccessfulOutboxHandOffs() = runTest {
+        val event = pl.usagi.edziennik.domain.changes.ChangeEvent.NewInformation(
+            java.time.LocalDate.of(2026, 10, 13), "Not stored in diagnostics",
+        )
+        var drains = 0
+        val publisher = object : PendingNotificationPublisher {
+            override suspend fun publishPending() = Unit
+            override suspend fun publishPending(onHandedOff: () -> Unit) {
+                drains++
+                repeat(if (drains == 1) 2 else 1) { onHandedOff() }
+            }
+        }
+        val counters = SyncRunCounters()
+        val result = PeriodicSyncRun({ true }, sync { OneShotSyncResult(listOf(event), emptyMap()) }, publisher).run(counters)
+        assertEquals(SyncRunStatus.COMPLETE, result.status)
+        assertEquals(1, counters.detectedEvents)
+        assertEquals(3, counters.handedOffNotifications)
+    }
+
+    @Test fun interruptedSyncDoesNotPretendToKnowDetectedCount() = runTest {
+        val counters = SyncRunCounters()
+        val result = PeriodicSyncRun({ true }, sync { throw java.io.IOException("not recorded") },
+            PendingNotificationPublisher {}).run(counters)
+        assertEquals(SyncRunStatus.FAILED, result.status)
+        assertEquals(null, counters.detectedEvents)
+    }
+
     @Test fun manualAndPeriodicRunsCannotSyncConcurrently() = runTest {
         var active = 0
         var maximumActive = 0
         var calls = 0
-        val sync = object : SnapshotSynchronizer {
-            override suspend fun syncOnce(): OneShotSyncResult {
-                active++
-                maximumActive = maxOf(maximumActive, active)
-                calls++
-                delay(10)
-                active--
-                return OneShotSyncResult(emptyList(), emptyMap())
-            }
-        }
-        val runner = PeriodicSyncRun({ true }, sync, FakeNotifier())
+        val runner = PeriodicSyncRun({ true }, sync {
+            active++
+            maximumActive = maxOf(maximumActive, active)
+            calls++
+            delay(10)
+            active--
+            OneShotSyncResult(emptyList(), emptyMap())
+        }, PendingNotificationPublisher {})
         val first = launch { runner.run() }
         val second = launch { runner.run() }
         first.join()
@@ -38,98 +58,70 @@ class PeriodicSyncRunTest {
         assertEquals(1, maximumActive)
     }
 
-    private val date = LocalDate.of(2026, 9, 30)
-    private val event = ChangeEvent.AttendanceChanged(
-        AttendanceKey(date, 12, null), "Matematyka", AttendanceStatus.Absent, true,
-    )
-
-    @Test fun invokesExistingSyncAndPublishesEvents() = runTest {
-        val sync = FakeSync(listOf(event))
-        val notifier = FakeNotifier()
-        PeriodicSyncRun({ true }, sync, notifier).run()
-        assertEquals(1, sync.calls)
-        assertEquals(listOf(event), notifier.published)
+    @Test fun invokesExistingSyncAndDrainsBeforeAndAfter() = runTest {
+        val steps = mutableListOf<String>()
+        PeriodicSyncRun({ true }, sync {
+            steps += "sync"
+            OneShotSyncResult(emptyList(), emptyMap())
+        }, PendingNotificationPublisher { steps += "outbox" }).run()
+        assertEquals(listOf("outbox", "sync", "outbox"), steps)
     }
 
-    @Test fun noSessionDoesNotSync() = runTest {
-        val sync = FakeSync(listOf(event))
-        val notifier = FakeNotifier()
-        PeriodicSyncRun({ false }, sync, notifier).run()
-        assertEquals(0, sync.calls)
-        assertEquals(emptyList<ChangeEvent>(), notifier.published)
+    @Test fun noSessionDoesNotSyncButStillDrainsPending() = runTest {
+        var calls = 0
+        var drains = 0
+        PeriodicSyncRun({ false }, sync {
+            calls++
+            OneShotSyncResult(emptyList(), emptyMap())
+        }, PendingNotificationPublisher { drains++ }).run()
+        assertEquals(0, calls)
+        assertEquals(2, drains)
     }
 
-    @Test fun baselineAndNoChangesDoNotPublish() = runTest {
-        val sync = FakeSync(emptyList())
-        val notifier = FakeNotifier()
-        val runner = PeriodicSyncRun({ true }, sync, notifier)
+    @Test fun baselineAndNoChangesStillDrainOlderPendingEvents() = runTest {
+        var drains = 0
+        val runner = PeriodicSyncRun({ true }, sync { OneShotSyncResult(emptyList(), emptyMap()) },
+            PendingNotificationPublisher { drains++ })
         runner.run()
         runner.run()
-        assertEquals(2, sync.calls)
-        assertEquals(0, notifier.publishCalls)
+        assertEquals(4, drains)
     }
 
-    @Test fun partialAreaDoesNotSuppressOrRepeatOtherEvents() = runTest {
-        val sync = FakeSync(listOf(event), mapOf(SnapshotArea.TASKS to SyncIssue.PARTIAL))
-        val notifier = FakeNotifier()
-        val runner = PeriodicSyncRun({ true }, sync, notifier)
-        runner.run()
-        sync.events = emptyList()
-        runner.run()
-        assertEquals(listOf(event), notifier.published)
-        assertEquals(1, notifier.publishCalls)
-    }
+    @Test fun partialAreaStillDrainsOutbox() = verifyIssues(SyncIssue.PARTIAL)
+    @Test fun failedAreaStillDrainsOutbox() = verifyIssues(SyncIssue.FAILED)
 
-    @Test fun failedAreaDoesNotBlockOtherEvents() = runTest {
-        val sync = FakeSync(listOf(event), mapOf(SnapshotArea.GRADES to SyncIssue.FAILED))
-        val notifier = FakeNotifier()
-        PeriodicSyncRun({ true }, sync, notifier).run()
-        assertEquals(listOf(event), notifier.published)
+    private fun verifyIssues(issue: SyncIssue) = runTest {
+        var drains = 0
+        PeriodicSyncRun({ true }, sync {
+            OneShotSyncResult(emptyList(), mapOf(SnapshotArea.TASKS to issue))
+        }, PendingNotificationPublisher { drains++ }).run()
+        assertEquals(2, drains)
     }
 
     @Test fun deniedNotificationsStillCompleteSynchronization() = runTest {
-        val sync = FakeSync(listOf(event))
-        val notifier = object : ChangeNotifier {
-            override fun publish(events: List<ChangeEvent>) = Unit
-        }
-        PeriodicSyncRun({ true }, sync, notifier).run()
-        assertEquals(1, sync.calls)
+        var calls = 0
+        PeriodicSyncRun({ true }, sync {
+            calls++
+            OneShotSyncResult(emptyList(), emptyMap())
+        }, PendingNotificationPublisher {}).run()
+        assertEquals(1, calls)
     }
 
     @Test fun logoutDuringSyncDoesNotPublishOldAccountEvents() = runTest {
         var current = true
+        var drains = 0
         val session = object : SyncSession {
             override suspend fun prepare() = true
             override fun isCurrent() = current
         }
-        val sync = object : SnapshotSynchronizer {
-            override suspend fun syncOnce(): OneShotSyncResult {
-                current = false
-                return OneShotSyncResult(listOf(event), emptyMap())
-            }
-        }
-        val notifier = FakeNotifier()
-        PeriodicSyncRun(session, sync, notifier).run()
-        assertEquals(0, notifier.publishCalls)
+        PeriodicSyncRun(session, sync {
+            current = false
+            OneShotSyncResult(emptyList(), emptyMap())
+        }, PendingNotificationPublisher { drains++ }).run()
+        assertEquals(2, drains)
     }
 
-    private class FakeSync(
-        var events: List<ChangeEvent>,
-        val issues: Map<SnapshotArea, SyncIssue> = emptyMap(),
-    ) : SnapshotSynchronizer {
-        var calls = 0
-        override suspend fun syncOnce(): OneShotSyncResult {
-            calls++
-            return OneShotSyncResult(events, issues)
-        }
-    }
-
-    private class FakeNotifier : ChangeNotifier {
-        val published = mutableListOf<ChangeEvent>()
-        var publishCalls = 0
-        override fun publish(events: List<ChangeEvent>) {
-            publishCalls++
-            published += events
-        }
+    private fun sync(block: suspend () -> OneShotSyncResult) = object : SnapshotSynchronizer {
+        override suspend fun syncOnce() = block()
     }
 }

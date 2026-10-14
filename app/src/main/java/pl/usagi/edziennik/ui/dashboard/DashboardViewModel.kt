@@ -87,6 +87,9 @@ class DashboardViewModel @Inject constructor(
                         upcomingTasks = DashboardSection(),
                         unreadMessagesCount = DashboardSection(),
                         information = DashboardSection(),
+                        daysOff = emptyList(),
+                        daysOffLoading = false,
+                        daysOffFailed = false,
                     )
                 }
                 if (student != null) {
@@ -106,6 +109,7 @@ class DashboardViewModel @Inject constructor(
 
     private fun loadDashboard(student: Student) {
         val today = LocalDate.now(clock)
+        loadDaysOff(student, today)
         loadTimetableDay(
             student = student,
             date = today,
@@ -121,6 +125,20 @@ class DashboardViewModel @Inject constructor(
         loadSchoolTasks(student, today)
         loadUnreadMessagesCount(student)
         loadInformation(student)
+    }
+
+    private fun loadDaysOff(student: Student, today: LocalDate) {
+        _uiState.update { it.copy(daysOffLoading = true, daysOffFailed = false) }
+        viewModelScope.launch {
+            try {
+                val daysOff = timetableRepository.getDaysOff(today, today.plusDays(1))
+                if (student.isStillActive()) _uiState.update { it.copy(daysOff = daysOff, daysOffLoading = false) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (student.isStillActive()) _uiState.update { it.copy(daysOffLoading = false, daysOffFailed = true) }
+            }
+        }
     }
 
     private fun loadInformation(student: Student) {

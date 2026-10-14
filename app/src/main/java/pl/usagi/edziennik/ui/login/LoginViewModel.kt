@@ -28,6 +28,8 @@ import pl.usagi.edziennik.repository.StudentRepository
 import pl.usagi.edziennik.persistence.changes.SnapshotStore
 import javax.inject.Inject
 import pl.usagi.edziennik.background.SyncScheduler
+import pl.usagi.edziennik.widget.WidgetUpdater
+import pl.usagi.edziennik.widget.updateSafely
 
 @HiltViewModel
 class LoginViewModel @Inject constructor(
@@ -42,6 +44,7 @@ class LoginViewModel @Inject constructor(
     private val localSnapshotIdentity: LocalSnapshotIdentity,
     private val snapshotStore: SnapshotStore,
     private val syncScheduler: SyncScheduler,
+    private val widgetUpdater: WidgetUpdater,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
@@ -120,6 +123,7 @@ class LoginViewModel @Inject constructor(
                     }
                 }
                 AutoDetectLoginResult.InvalidCredentials,
+                AutoDetectLoginResult.TransientError,
                 AutoDetectLoginResult.TechnicalError -> {
                     val message = if (result == AutoDetectLoginResult.InvalidCredentials) {
                         AuthenticationException.InvalidCredentials().toLoginErrorMessage()
@@ -147,13 +151,15 @@ class LoginViewModel @Inject constructor(
 
     fun clearSession() {
         viewModelScope.launch {
+            val oldAccountId = localSnapshotIdentity.clearAccount()
+            widgetUpdater.updateSafely()
             syncScheduler.cancel()
             sessionManager.clearSession()
             currentSession.clear()
             autoLoginSettings.setAutoLoginEnabled(false)
             autoLoginSettings.setAuthenticationProvider(null)
             activeStudentManager.clear()
-            clearSnapshotAccount()
+            oldAccountId?.let { deleteSnapshotsSafely(it) }
             _uiState.update {
                 LoginUiState(
                     isCheckingSession = false,
@@ -277,11 +283,7 @@ class LoginViewModel @Inject constructor(
         val oldId = runCatching { localSnapshotIdentity.currentAccountId() }.getOrNull()
         runCatching { localSnapshotIdentity.replaceAccountId() }
             .onFailure { runCatching { localSnapshotIdentity.clearAccount() } }
-        oldId?.let { deleteSnapshotsSafely(it) }
-    }
-
-    private suspend fun clearSnapshotAccount() {
-        val oldId = runCatching { localSnapshotIdentity.clearAccount() }.getOrNull()
+        widgetUpdater.updateSafely()
         oldId?.let { deleteSnapshotsSafely(it) }
     }
 

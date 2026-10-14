@@ -1,6 +1,7 @@
 package pl.usagi.edziennik.ui.grades
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Test
 import pl.usagi.edziennik.domain.ClassificationPeriod
 import pl.usagi.edziennik.domain.Grade
@@ -12,6 +13,70 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 
 class GradesPresentationTest {
+    @Test fun subjectGradesAreGloballySortedAcrossColumns() {
+        val older = grade("3", LocalDate.of(2026, 9, 10))
+        val newest = grade("5", LocalDate.of(2026, 9, 14))
+        val middle = grade("4", LocalDate.of(2026, 9, 12))
+        val data = subject(1, "Matematyka", older).copy(columns = listOf(
+            GradeColumn(1, "Sprawdzian", "Algebra", listOf(older, newest)),
+            GradeColumn(2, "Kartkówka", "Geometria", listOf(middle)),
+        ))
+
+        val sorted = data.gradesByDate()
+        assertEquals(listOf(newest, middle, older), sorted.map { it.second.value })
+        assertEquals(listOf(1, 2, 1), sorted.map { it.first.id })
+        assertEquals(listOf(1, 0, 0), sorted.map { it.second.index })
+        assertEquals(listOf(older, newest), data.columns[0].grades)
+    }
+
+    @Test fun equalDatesPreserveApiColumnAndGradeOrderIncludingDuplicates() {
+        val date = LocalDate.of(2026, 9, 10)
+        val first = grade("4", date)
+        val second = grade("5", date)
+        val data = subject(1, "Matematyka", first).copy(columns = listOf(
+            GradeColumn(9, "A", "Pierwsza", listOf(first, second, first)),
+            GradeColumn(2, "B", "Druga", listOf(second, first)),
+        ))
+
+        val sorted = data.gradesByDate()
+        assertEquals(listOf(first, second, first, second, first), sorted.map { it.second.value })
+        assertEquals(listOf(9 to 0, 9 to 1, 9 to 2, 2 to 0, 2 to 1),
+            sorted.map { it.first.id to it.second.index })
+    }
+
+    @Test fun descriptiveAndNonNumericGradesAreSortedOnlyByDate() {
+        val descriptive = grade("Bardzo dobrze opanował materiał", LocalDate.of(2026, 9, 11))
+        val nonNumeric = grade("np", LocalDate.of(2026, 9, 14))
+        val symbolic = grade("+", LocalDate.of(2026, 9, 12))
+        val data = subject(1, "Polski", descriptive).copy(columns = listOf(
+            GradeColumn(1, "Opisowa", "Praca", listOf(descriptive, nonNumeric)),
+            GradeColumn(2, "Aktywność", "Lekcja", listOf(symbolic)),
+        ))
+        assertEquals(listOf(nonNumeric, symbolic, descriptive), data.gradesByDate().map { it.second.value })
+    }
+
+    @Test fun sortingPreservesEntireGradeAndColumnWithoutChangingAverages() {
+        val complete = grade("4+", LocalDate.of(2026, 9, 11)).copy(
+            columnId = 8, category = "Kategoria API", columnName = "Opis API",
+            weight = java.math.BigDecimal("3.5"), color = 123, teacher = "Nauczyciel",
+            changedSinceLastLogin = true, correctedGradeId = 42,
+        )
+        val column = GradeColumn(8, "Kategoria kolumny", "Opis kolumny", listOf(complete))
+        val data = subject(1, "Polski", complete).copy(columns = listOf(column),
+            average = java.math.BigDecimal("4.2"), averageAllTerms = java.math.BigDecimal("4.1"))
+        val sorted = data.gradesByDate().single()
+        assertSame(column, sorted.first)
+        assertSame(complete, sorted.second.value)
+        assertEquals(java.math.BigDecimal("4.2"), data.average)
+        assertEquals(java.math.BigDecimal("4.1"), data.averageAllTerms)
+    }
+
+    @Test fun emptyColumnsProduceEmptyGradeList() {
+        val data = subject(1, "Polski", grade("4", LocalDate.of(2026, 9, 10)))
+        assertEquals(emptyList<Any>(), data.copy(columns = emptyList()).gradesByDate())
+        assertEquals(emptyList<Any>(), data.copy(columns = data.columns.map { it.copy(grades = emptyList()) }).gradesByDate())
+    }
+
     @Test
     fun subjectWithGradeIsVisible() {
         val subject = subject(position = 1, name = "Matematyka", grade = grade("4", LocalDate.of(2026, 9, 10)))

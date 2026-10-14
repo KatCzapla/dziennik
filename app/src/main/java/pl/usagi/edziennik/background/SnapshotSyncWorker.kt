@@ -10,6 +10,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import pl.usagi.edziennik.persistence.changes.SnapshotSynchronizer
+import pl.usagi.edziennik.persistence.changes.SyncDiagnostics
+import pl.usagi.edziennik.persistence.changes.syncFailureCause
 import javax.inject.Inject
 import javax.inject.Singleton
 import pl.usagi.edziennik.widget.enqueueLocalTimetableWidgetUpdate
@@ -18,14 +20,39 @@ import pl.usagi.edziennik.widget.enqueueLocalTimetableWidgetUpdate
 class PeriodicSyncRun @Inject constructor(
     private val session: SyncSession,
     private val sync: SnapshotSynchronizer,
-    private val notifier: ChangeNotifier,
+    private val outbox: PendingNotificationPublisher,
 ) {
     private val mutex = Mutex()
 
-    suspend fun run() = mutex.withLock {
-        if (!session.prepare()) return@withLock
-        val events = sync.syncOnce().events
-        if (events.isNotEmpty() && session.isCurrent()) notifier.publish(events)
+    suspend fun run(counters: SyncRunCounters = SyncRunCounters()): SyncRunResult = mutex.withLock {
+        publishOutboxSafely(counters)
+        try {
+            val preparation = session.prepareResult()
+            if (preparation != SessionPreparation.READY) {
+                return@withLock SyncRunResult(SyncRunStatus.FAILED, preparation.retryable, preparation.name)
+            }
+            counters.detectedEvents = null
+            val result = sync.syncOnce()
+            counters.detectedEvents = result.events.size
+            if (!session.isCurrent()) SyncRunResult(SyncRunStatus.FAILED, reason = "ACCOUNT_CHANGED")
+            else result.runResult()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            val cause = failure.syncFailureCause()
+            SyncRunResult(SyncRunStatus.FAILED, cause.retryable, cause.name)
+        } finally {
+            publishOutboxSafely(counters)
+        }
+    }
+
+    private suspend fun publishOutboxSafely(counters: SyncRunCounters) {
+        try { outbox.publishPending { counters.handedOffNotifications++ } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            try { android.util.Log.w("SnapshotSync", "Outbox publication incomplete; events retained") }
+            catch (_: RuntimeException) { }
+        }
     }
 }
 
@@ -35,14 +62,19 @@ class SnapshotSyncWorker @AssistedInject constructor(
     @Assisted parameters: WorkerParameters,
     private val syncRun: PeriodicSyncRun,
     private val manualSyncRun: ManualWidgetSyncRun,
+    private val diagnostics: SyncDiagnostics,
 ) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result = try {
-        if (inputData.getBoolean(MANUAL_REFRESH, false)) manualSyncRun.run() else syncRun.run()
-        Result.success()
+        val result = diagnostics.recordRun(inputData.getBoolean(MANUAL_REFRESH, false)) { counters ->
+            if (inputData.getBoolean(MANUAL_REFRESH, false)) manualSyncRun.run(counters) else syncRun.run(counters)
+        }
+        android.util.Log.d("SnapshotSync", "Sync status=${result.status} retryable=${result.retryable} reason=${result.reason}")
+        result.workResult()
     } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (_: Exception) {
-        if (inputData.getBoolean(MANUAL_REFRESH, false)) Result.failure() else Result.retry()
+    } catch (failure: Exception) {
+        val cause = failure.syncFailureCause()
+        SyncRunResult(SyncRunStatus.FAILED, cause.retryable, cause.name).workResult()
     } finally {
         if (inputData.getBoolean(MANUAL_REFRESH, false)) {
             enqueueLocalTimetableWidgetUpdate(applicationContext, waitForManualFinish = true)

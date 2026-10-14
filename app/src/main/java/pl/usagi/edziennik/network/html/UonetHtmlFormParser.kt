@@ -3,16 +3,26 @@ package pl.usagi.edziennik.network.html
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.jsoup.Jsoup
 
+enum class LoginFormFailure {
+    NO_PASSWORD_INPUT, PASSWORD_OUTSIDE_FORM, NO_LOGIN_FIELD, NO_NAMED_PASSWORD_FIELD,
+}
+
 class UonetHtmlFormParser {
     fun parseLoginForm(
         html: String,
         currentUrl: String,
         username: String,
         password: String,
+        onFailure: (LoginFormFailure) -> Unit = {},
     ): HtmlForm? {
+        fun reject(reason: LoginFormFailure): HtmlForm? {
+            onFailure(reason)
+            return null
+        }
         val document = Jsoup.parse(html, currentUrl)
-        val passwordInput = document.selectFirst("input[type=password]") ?: return null
-        val form = passwordInput.closest("form") ?: return null
+        val passwordInput = document.selectFirst("input[type=password]")
+            ?: return reject(LoginFormFailure.NO_PASSWORD_INPUT)
+        val form = passwordInput.closest("form") ?: return reject(LoginFormFailure.PASSWORD_OUTSIDE_FORM)
 
         val fields = linkedMapOf<String, String>()
         var usernameFieldName: String? = null
@@ -29,8 +39,8 @@ class UonetHtmlFormParser {
             }
         }
 
-        val resolvedUsernameField = usernameFieldName ?: return null
-        val resolvedPasswordField = passwordFieldName ?: return null
+        val resolvedUsernameField = usernameFieldName ?: return reject(LoginFormFailure.NO_LOGIN_FIELD)
+        val resolvedPasswordField = passwordFieldName ?: return reject(LoginFormFailure.NO_NAMED_PASSWORD_FIELD)
 
         fields[resolvedUsernameField] = username
         fields[resolvedPasswordField] = password

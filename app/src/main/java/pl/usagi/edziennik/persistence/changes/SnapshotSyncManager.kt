@@ -61,21 +61,10 @@ class SnapshotSyncManager @Inject constructor(
     private val widgetUpdater: TimetableWidgetUpdater = TimetableWidgetUpdater {},
     private val tasksWidgetUpdater: TasksWidgetUpdater = TasksWidgetUpdater {},
 ) {
-    // Foreground reads refresh the same baseline without producing notification events.
+    // UI and background share detection and the atomic snapshot/outbox transaction.
     suspend fun saveCompleteTimetable(scope: SnapshotScope, entries: List<TimetableEntry>) {
         require(scope.area == SnapshotArea.TIMETABLE)
-        if (scope.accountId != identity.currentAccountId()) return
-        var written = false
-        store.update(scope) {
-            if (scope.accountId != identity.currentAccountId()) return@update SnapshotWrite(null)
-            val payload = SnapshotPayload.Timetable(
-                entries.timetableSnapshots(),
-                lastCompleteAtEpochMillis = clock.millis(),
-            )
-            written = true
-            SnapshotWrite(json.encodeToString<SnapshotPayload>(payload))
-        }
-        if (written) widgetUpdater.updateSafely()
+        sync(scope, SyncCompleteness.Complete, CurrentSnapshotData.Timetable(entries))
     }
 
     suspend fun knownMessageIds(scope: SnapshotScope): Set<Int>? {

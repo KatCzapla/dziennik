@@ -93,7 +93,7 @@ sealed class GradesFetchException(
 ) : Exception(message, cause) {
     class Network(cause: Throwable) : GradesFetchException("Could not fetch UONET+ grades.", cause)
 
-    class Http(statusCode: Int) : GradesFetchException("UONET+ grades request failed with HTTP $statusCode.")
+    class Http(val statusCode: Int) : GradesFetchException("UONET+ grades request failed with HTTP $statusCode.")
 
     class UnexpectedResponse(cause: Throwable? = null) :
         GradesFetchException("UONET+ grades response did not match the expected contract.", cause)

@@ -18,12 +18,15 @@ import okhttp3.Response
 import org.jsoup.Jsoup
 import pl.usagi.edziennik.network.html.UonetHtmlFormParser
 import pl.usagi.edziennik.network.session.WsFederationNavigator
+import pl.usagi.edziennik.network.session.AuthenticationException
+import pl.usagi.edziennik.network.session.authenticationDiagnostic
 
 sealed interface EduVulcanLoginResult {
     data object Accepted : EduVulcanLoginResult
     class Authenticated(val client: OkHttpClient) : EduVulcanLoginResult
     data object InvalidCredentials : EduVulcanLoginResult
     data object TechnicalError : EduVulcanLoginResult
+    data object TransientError : EduVulcanLoginResult
 }
 
 class EduVulcanLogin(
@@ -38,7 +41,7 @@ class EduVulcanLogin(
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
-                EduVulcanLoginResult.TechnicalError
+                exception.loginFailureResult()
             }
         }
 
@@ -63,7 +66,7 @@ class EduVulcanLogin(
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
-                EduVulcanLoginResult.TechnicalError
+                exception.loginFailureResult()
             }
         }
 
@@ -79,22 +82,22 @@ class EduVulcanLogin(
         val loginPage = sessionClient.newCall(
             Request.Builder().url(LOGIN_URL).get().build(),
         ).execute().use { response ->
-            if (!response.isSuccessful) return EduVulcanLoginResult.TechnicalError
+            if (!response.isSuccessful) return response.loginFailureResult()
             response.body.string()
         }
 
         val document = Jsoup.parse(loginPage)
         val csrf = document.selectFirst("input[name=__RequestVerificationToken]")
             ?.attr("value")?.takeIf(String::isNotEmpty)
-            ?: return EduVulcanLoginResult.TechnicalError
+            ?: return technicalFailure("EDUVULCAN_CSRF_INPUT")
         val captcha = document.selectFirst(".captcha-wrapper")
-            ?: return EduVulcanLoginResult.TechnicalError
+            ?: return technicalFailure("EDUVULCAN_CAPTCHA_ELEMENT")
         val challenge = captcha.attr("data-challenge").takeIf(String::isNotEmpty)
-            ?: return EduVulcanLoginResult.TechnicalError
+            ?: return technicalFailure("EDUVULCAN_CAPTCHA_CHALLENGE")
         val difficulty = captcha.attr("data-difficulty").toLongOrNull()
-            ?: return EduVulcanLoginResult.TechnicalError
+            ?: return technicalFailure("EDUVULCAN_CAPTCHA_DIFFICULTY")
         val rounds = captcha.attr("data-rounds").toIntOrNull()
-            ?: return EduVulcanLoginResult.TechnicalError
+            ?: return technicalFailure("EDUVULCAN_CAPTCHA_ROUNDS")
 
         val queryResponse = sessionClient.postForm(
             QUERY_USER_URL,
@@ -104,11 +107,12 @@ class EduVulcanLogin(
                 .build(),
         )
         val querySucceeded = queryResponse.use { response ->
+            if (!response.isSuccessful) return response.loginFailureResult()
             response.isSuccessful &&
                 json.parseToJsonElement(response.body.string())
                     .jsonObject["success"]?.jsonPrimitive?.booleanOrNull == true
         }
-        if (!querySucceeded) return EduVulcanLoginResult.TechnicalError
+        if (!querySucceeded) return technicalFailure("EDUVULCAN_QUERY_USER")
 
         val proof = EduVulcanProofOfWork.solve(challenge, difficulty, rounds)
         val loginResponse = sessionClient.newBuilder().followRedirects(false).build()
@@ -127,7 +131,7 @@ class EduVulcanLogin(
                 response.code == 200 &&
                     "Zła nazwa użytkownika lub hasło" in response.body.string() ->
                     EduVulcanLoginResult.InvalidCredentials
-                else -> EduVulcanLoginResult.TechnicalError
+                else -> response.loginFailureResult()
             }
         }
     }
@@ -137,14 +141,14 @@ class EduVulcanLogin(
             Request.Builder().url(JOURNALS_URL).get().build(),
         ).execute()
         val journalUrl = journalsResponse.use { response ->
-            if (!response.isSuccessful) return EduVulcanLoginResult.TechnicalError
+            if (!response.isSuccessful) return response.loginFailureResult()
             val document = Jsoup.parse(response.body.string())
             val links = document.select("a[href]")
                 .mapNotNull { link ->
                     link.attr("href").takeIf { "/dziennik?" in it }
                         ?.let(response.request.url::resolve)
                 }
-            if (links.size != 1) return EduVulcanLoginResult.TechnicalError
+            if (links.size != 1) return technicalFailure("EDUVULCAN_JOURNAL_SELECTION")
             links.single()
         }
 
@@ -152,14 +156,15 @@ class EduVulcanLogin(
             Request.Builder().url(journalUrl).get().build(),
         ).execute()
         if (!journalResponse.isSuccessful) {
+            val failure = journalResponse.loginFailureResult()
             journalResponse.close()
-            return EduVulcanLoginResult.TechnicalError
+            return failure
         }
 
         WsFederationNavigator(sessionClient, UonetHtmlFormParser())
             .follow(journalResponse, UONET_HOST)
             .use { response ->
-                if (!response.isSuccessful) return EduVulcanLoginResult.TechnicalError
+                if (!response.isSuccessful) return response.loginFailureResult()
             }
 
         val contextRequest = Request.Builder()
@@ -168,6 +173,7 @@ class EduVulcanLogin(
             .get()
             .build()
         val isSessionValid = sessionClient.newCall(contextRequest).execute().use { response ->
+            if (!response.isSuccessful) return response.loginFailureResult()
             response.code == 200 && response.request.url.host == UONET_HOST &&
                 response.header("Content-Type").orEmpty()
                     .contains("application/json", ignoreCase = true) &&
@@ -176,7 +182,7 @@ class EduVulcanLogin(
         return if (isSessionValid) {
             EduVulcanLoginResult.Authenticated(sessionClient)
         } else {
-            EduVulcanLoginResult.TechnicalError
+            technicalFailure("EDUVULCAN_CONTEXT_VERIFICATION")
         }
     }
 
@@ -227,4 +233,23 @@ internal fun copyAuthenticatedCookies(cookies: List<Cookie>, target: CookieJar) 
     cookies.forEach { cookie ->
         target.saveFromResponse("https://${cookie.domain}/".toHttpUrl(), listOf(cookie))
     }
+}
+
+private fun Response.loginFailureResult(): EduVulcanLoginResult {
+    authenticationDiagnostic("EDUVULCAN_HTTP", code.toString())
+    return if (code in setOf(408, 429) || code >= 500) EduVulcanLoginResult.TransientError else EduVulcanLoginResult.TechnicalError
+}
+
+private fun Throwable.loginFailureResult(): EduVulcanLoginResult {
+    authenticationDiagnostic("EDUVULCAN_AUTH_EXCEPTION", this::class.java.simpleName)
+    return when {
+    this is java.io.IOException || this is AuthenticationException.Network -> EduVulcanLoginResult.TransientError
+    this is AuthenticationException.Http && (statusCode in setOf(408, 429) || statusCode >= 500) -> EduVulcanLoginResult.TransientError
+    else -> EduVulcanLoginResult.TechnicalError
+    }
+}
+
+private fun technicalFailure(stage: String): EduVulcanLoginResult {
+    authenticationDiagnostic(stage, "TECHNICAL_ERROR")
+    return EduVulcanLoginResult.TechnicalError
 }

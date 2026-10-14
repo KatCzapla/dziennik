@@ -44,6 +44,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun AttendanceExcuseRoute(
     onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     viewModel: AttendanceViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -63,9 +64,7 @@ fun AttendanceExcuseRoute(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             EDziennikTopBar(
-                activeStudent = state.activeStudent,
-                students = state.students,
-                onStudentSelected = viewModel::selectStudent,
+                onOpenSettings = onOpenSettings,
                 showBack = true,
                 onBack = {
                     if (!state.isSubmittingExcuse) {

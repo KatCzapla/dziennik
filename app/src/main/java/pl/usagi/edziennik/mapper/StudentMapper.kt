@@ -10,6 +10,7 @@ fun StudentDto.toDomain(): Student =
         name = name,
         className = className,
         schoolName = schoolName,
+        organizationalUnitId = organizationalUnitId,
     )
 
 fun List<StudentDto>.toDomainStudents(): List<Student> = map { it.toDomain() }

@@ -33,4 +33,5 @@ data class AttendanceFetchResult(
     val excusesComplete: Boolean,
     val entriesComplete: Boolean = true,
     val excusesActive: Boolean? = null,
+    val excusesFailure: Exception? = null,
 )

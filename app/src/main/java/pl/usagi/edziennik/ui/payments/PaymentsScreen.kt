@@ -30,28 +30,29 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import pl.usagi.edziennik.R
 import pl.usagi.edziennik.domain.BankAccountPayment
 import pl.usagi.edziennik.domain.MonthlyPayment
-import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.components.EmptyState
 import pl.usagi.edziennik.ui.components.ErrorState
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 
 @Composable
-fun PaymentsRoute(onBack: () -> Unit, viewModel: PaymentsViewModel = hiltViewModel()) {
+fun PaymentsRoute(onBack: () -> Unit, onOpenSettings: () -> Unit, viewModel: PaymentsViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsState()
-    PaymentsScreen(state, onBack, viewModel::selectStudent, viewModel::retry)
+    PaymentsScreen(state, onBack, onOpenSettings, viewModel::retry)
 }
 
 @Composable
 private fun PaymentsScreen(
     state: PaymentsUiState,
     onBack: () -> Unit,
-    onStudentSelected: (Student) -> Unit,
+    onOpenSettings: () -> Unit,
     onRetry: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
@@ -59,9 +60,7 @@ private fun PaymentsScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             EDziennikTopBar(
-                activeStudent = state.activeStudent,
-                students = state.students,
-                onStudentSelected = onStudentSelected,
+                onOpenSettings = onOpenSettings,
                 showBack = true,
                 onBack = onBack,
             )
@@ -72,9 +71,16 @@ private fun PaymentsScreen(
             verticalArrangement = Arrangement.spacedBy(spacing.lg),
         ) {
             item {
-                Column {
-                    Spacer(Modifier.height(spacing.sm))
-                    Text("Opłaty", style = MaterialTheme.typography.titleLarge)
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Opłaty",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                    )
                 }
             }
             when {

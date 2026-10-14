@@ -40,6 +40,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,11 +58,13 @@ import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.network.messages.MessagesDiagnostics
 import pl.usagi.edziennik.ui.components.EmptyState
 import pl.usagi.edziennik.ui.components.QuietLoadingState
-import pl.usagi.edziennik.ui.components.StudentSwitcher
+import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.dashboard.DashboardRoute
 import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
 import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
+import androidx.compose.ui.res.stringResource
+import pl.usagi.edziennik.R
 
 @Composable
 fun LoginRoute(
@@ -73,9 +76,23 @@ fun LoginRoute(
     onOpenTask: (SchoolTaskNavigationTarget) -> Unit,
     onOpenMessages: () -> Unit,
     onOpenPayments: () -> Unit,
+    onOpenSettings: () -> Unit = {},
+    logoutPending: Boolean = false,
+    onLogoutFinished: () -> Unit = {},
     viewModel: LoginViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
+    LaunchedEffect(logoutPending, state.isSessionValid) {
+        if (logoutPending && !state.isSessionValid) onLogoutFinished()
+    }
+    if (logoutPending) {
+        QuietLoadingState(
+            title = stringResource(R.string.settings_logging_out),
+            message = "",
+            modifier = Modifier.fillMaxSize().padding(EDziennikTheme.spacing.lg),
+        )
+        return
+    }
     val context = LocalContext.current
     var notificationsGranted by remember {
         mutableStateOf(Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
@@ -103,6 +120,7 @@ fun LoginRoute(
         onOpenTask = onOpenTask,
         onOpenMessages = onOpenMessages,
         onOpenPayments = onOpenPayments,
+        onOpenSettings = onOpenSettings,
         showEnableNotifications = !notificationsGranted,
         onEnableNotifications = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
     )
@@ -127,16 +145,14 @@ private fun LoginScreen(
     onOpenPayments: () -> Unit,
     showEnableNotifications: Boolean,
     onEnableNotifications: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             if (state.activeStudent != null && state.screenMode != LoginScreenMode.Home) {
                 HomeChrome(
-                    activeStudent = state.activeStudent,
-                    students = state.students,
-                    onStudentSelected = onStudentSelected,
-                    onClearSession = onClearSession,
+                    onOpenSettings = onOpenSettings,
                 )
             }
         },
@@ -165,9 +181,9 @@ private fun LoginScreen(
                         onOpenTask = onOpenTask,
                         onOpenMessages = onOpenMessages,
                         onOpenPayments = onOpenPayments,
-                        onLogout = onClearSession,
                         showEnableNotifications = showEnableNotifications,
                         onEnableNotifications = onEnableNotifications,
+                        onOpenSettings = onOpenSettings,
                     )
                     LoginScreenMode.PickStudent -> StudentPickerContent(
                         students = state.students,
@@ -190,32 +206,9 @@ private fun LoginScreen(
 
 @Composable
 private fun HomeChrome(
-    activeStudent: Student,
-    students: List<Student>,
-    onStudentSelected: (Student) -> Unit,
-    onClearSession: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
-    val spacing = EDziennikTheme.spacing
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(horizontal = spacing.sm, vertical = spacing.xs),
-        horizontalArrangement = Arrangement.spacedBy(spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Spacer(modifier = Modifier.weight(1f))
-        StudentSwitcher(
-            activeStudent = activeStudent,
-            students = students,
-            onStudentSelected = onStudentSelected,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = onClearSession) {
-            Text("Wyloguj")
-        }
-    }
+    EDziennikTopBar(onOpenSettings = onOpenSettings)
 }
 
 @Composable

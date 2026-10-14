@@ -8,6 +8,39 @@ import org.junit.Test
 class UonetHtmlFormParserTest {
     private val parser = UonetHtmlFormParser()
 
+    @Test fun missingPasswordIsReportedWithoutHtmlOrCredentials() {
+        assertFailure("<form><input name='login'></form>", LoginFormFailure.NO_PASSWORD_INPUT)
+    }
+
+    @Test fun passwordOutsideFormIsReported() {
+        assertFailure("<input type='password' name='password'>", LoginFormFailure.PASSWORD_OUTSIDE_FORM)
+    }
+
+    @Test fun missingNamedLoginFieldIsReported() {
+        assertFailure("<form><input type='password' name='password'></form>", LoginFormFailure.NO_LOGIN_FIELD)
+    }
+
+    @Test fun missingPasswordNameIsReported() {
+        assertFailure("<form><input type='text' name='login'><input type='password'></form>",
+            LoginFormFailure.NO_NAMED_PASSWORD_FIELD)
+    }
+
+    @Test fun validFormDoesNotReportFailureAndPreservesAuthenticationFields() {
+        var failure: LoginFormFailure? = null
+        val form = parser.parseLoginForm("<form><input name='login'><input type='password' name='password'></form>",
+            "https://example.test/login", "test-login", "test-password", { failure = it })
+        assertNull(failure)
+        assertEquals("test-login", form?.fields?.get("login"))
+        assertEquals("test-password", form?.fields?.get("password"))
+    }
+
+    private fun assertFailure(html: String, expected: LoginFormFailure) {
+        val reasons = mutableListOf<LoginFormFailure>()
+        assertNull(parser.parseLoginForm(html, "https://example.test/login?private=not-logged",
+            "test-login", "test-password", reasons::add))
+        assertEquals(listOf(expected), reasons)
+    }
+
     @Test
     fun parsesLoginFormUsingPasswordInputParentForm() {
         val html = """

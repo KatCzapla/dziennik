@@ -41,12 +41,13 @@ class TimetableWidgetUpdatesTest {
         assertEquals(clock.instant(), shown.lastCompleteAt)
     }
 
-    @Test fun uiSaveRedrawsSharedSnapshotWithoutEvents() = runTest {
+    @Test fun uiSaveRedrawsSharedSnapshotAndDetectsChanges() = runTest {
         manager.saveCompleteTimetable(scope, listOf(lesson))
         manager.saveCompleteTimetable(scope, listOf(lesson.copy(room = "218")))
         assertEquals(2, displayed.size)
         assertEquals("218", (displayed.last() as LocalTimetableResult.Available).lessons.single().room)
-        assertTrue(store.events.isEmpty())
+        assertEquals(1, store.events.size)
+        assertTrue(store.events.single() is ChangeEvent.LessonUpdated)
     }
 
     @Test fun completeEmptyPlanAlsoRedrawsAsAvailable() = runTest {

@@ -37,6 +37,7 @@ data class LocalTasksResult(
     val tasks: List<LocalTask>,
     val coverage: TaskRangeCoverage,
     val weeks: List<LocalTaskWeek>,
+    val isLoggedOut: Boolean = false,
 )
 
 class LocalTasksReader @Inject constructor(
@@ -51,7 +52,7 @@ class LocalTasksReader @Inject constructor(
         fun noBaseline() = LocalTasksResult(start, end, emptyList(), TaskRangeCoverage.NO_BASELINE,
             expected.map { LocalTaskWeek(it.from, it.to, TaskRangeCoverage.NO_BASELINE) })
 
-        val accountId = identity.currentAccountId() ?: return noBaseline()
+        val accountId = identity.currentAccountId() ?: return noBaseline().copy(isLoggedOut = true)
         val studentId = identity.selectedStudentScopeId() ?: return noBaseline()
         val tasks = mutableListOf<LocalTask>()
         val weeks = expected.map { week ->
@@ -75,7 +76,9 @@ class LocalTasksReader @Inject constructor(
                     payload.lastCompleteAtEpochMillis?.let(Instant::ofEpochMilli), failedDetails)
             }
         }
-        if (identity.currentAccountId() != accountId || identity.selectedStudentScopeId() != studentId) return noBaseline()
+        if (identity.currentAccountId() != accountId || identity.selectedStudentScopeId() != studentId) {
+            return noBaseline().copy(isLoggedOut = identity.currentAccountId() == null)
+        }
         val coverage = when {
             weeks.isEmpty() -> TaskRangeCoverage.FULL // No school-year dates fall in the requested range.
             weeks.all { it.coverage == TaskRangeCoverage.NO_BASELINE } -> TaskRangeCoverage.NO_BASELINE

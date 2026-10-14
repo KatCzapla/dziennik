@@ -109,7 +109,8 @@ private fun tasksWidgetIntent(context: Context, route: String) = Intent(context,
 private fun UpcomingTasksContent(presentation: UpcomingTasksPresentation, refreshing: Boolean) {
     val context = LocalContext.current
     val scale = context.resources.configuration.fontScale.coerceAtLeast(1f)
-    val count = visibleTaskCount(LocalSize.current.height.value, scale, presentation.message != null, refreshing)
+    val count = visibleTaskCount(LocalSize.current.height.value, scale, presentation.message != null,
+        refreshing && !presentation.isLoggedOut)
     val shown = presentation.items.take(count)
     val remaining = presentation.items.size - shown.size
     val openModule = actionStartActivity(tasksWidgetIntent(context, "schoolTasks"))
@@ -142,12 +143,12 @@ private fun UpcomingTasksContent(presentation: UpcomingTasksPresentation, refres
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalAlignment = Alignment.End
                 ) {
-                    if (refreshing) {
+                    if (refreshing && !presentation.isLoggedOut) {
                         Text("Odświeżanie...", style = TextStyle(color = taskMuted, fontSize = 12.sp), maxLines = 1)
 
                         Spacer(modifier = GlanceModifier.width(8.dp))
                     }
-                    Image(provider = ImageProvider(R.drawable.ic_widget_refresh), contentDescription = "Odśwież zadania",
+                    if (!presentation.isLoggedOut) Image(provider = ImageProvider(R.drawable.ic_widget_refresh), contentDescription = "Odśwież zadania",
                         colorFilter = ColorFilter.tint(taskMuted), modifier = GlanceModifier.size(32.dp).padding(6.dp)
                             .clickable(actionRunCallback<RefreshTimetableAction>()))
                 }
@@ -160,7 +161,7 @@ private fun UpcomingTasksContent(presentation: UpcomingTasksPresentation, refres
         }
         Column(modifier = GlanceModifier.fillMaxWidth()) {
             shown.forEach { task ->
-                Column(modifier = GlanceModifier.fillMaxWidth().height((64f * scale).dp).padding(vertical = 4.dp)
+                Column(modifier = GlanceModifier.fillMaxWidth().padding(vertical = 4.dp)
                     .clickable(actionStartActivity(tasksWidgetIntent(context, task.target.route())))) {
                     Row() {
                         Text("${task.dateLabel} · ", modifier = GlanceModifier.defaultWeight(),
@@ -172,7 +173,7 @@ private fun UpcomingTasksContent(presentation: UpcomingTasksPresentation, refres
                     }
                     Text(task.subject, style = TextStyle(color = taskInk, fontSize = 14.sp,
                         fontWeight = FontWeight.Medium), maxLines = 1)
-                    task.description?.let { Text(it, style = TextStyle(color = taskMuted, fontSize = 12.sp), maxLines = 1) }
+                    task.description?.let { Text(it, style = TextStyle(color = taskMuted, fontSize = 12.sp), maxLines = 3) }
                 }
             }
         }

@@ -21,4 +21,6 @@ data class StudentDto(
     val className: String,
     @SerialName("jednostka")
     val schoolName: String,
+    @SerialName("idJednostkaSkladowa")
+    val organizationalUnitId: Int? = null,
 )

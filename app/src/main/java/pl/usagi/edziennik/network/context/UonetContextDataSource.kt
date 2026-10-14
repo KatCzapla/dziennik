@@ -33,7 +33,7 @@ sealed class ContextFetchException(
 ) : Exception(message, cause) {
     class Network(cause: Throwable) : ContextFetchException("Could not fetch UONET+ context.", cause)
 
-    class Http(statusCode: Int) : ContextFetchException("UONET+ context request failed with HTTP $statusCode.")
+    class Http(val statusCode: Int) : ContextFetchException("UONET+ context request failed with HTTP $statusCode.")
 
     data object UnexpectedResponse : ContextFetchException("UONET+ context response did not match the expected contract.")
 }

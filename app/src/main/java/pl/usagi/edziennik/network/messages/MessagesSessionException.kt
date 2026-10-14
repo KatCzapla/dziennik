@@ -19,7 +19,7 @@ sealed class MessagesSessionException(
     class MissingBootstrapData(name: String) :
         MessagesSessionException("Messages bootstrap data is missing: $name.")
 
-    class Http(statusCode: Int) : MessagesSessionException("Messages API request failed with HTTP $statusCode.")
+    class Http(val statusCode: Int) : MessagesSessionException("Messages API request failed with HTTP $statusCode.")
 
     class Network(cause: Throwable) : MessagesSessionException("Could not connect to Messages API.", cause)
 

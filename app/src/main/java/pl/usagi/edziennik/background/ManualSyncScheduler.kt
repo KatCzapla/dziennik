@@ -2,6 +2,8 @@ package pl.usagi.edziennik.background
 
 import android.content.Context
 import androidx.work.Constraints
+import androidx.work.BackoffPolicy
+import java.util.concurrent.TimeUnit
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
@@ -10,6 +12,7 @@ import androidx.work.workDataOf
 import androidx.work.await
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import pl.usagi.edziennik.persistence.changes.LocalSnapshotIdentity
 
 fun interface ManualSyncWorkQueue {
     suspend fun enqueueUnique(name: String, policy: ExistingWorkPolicy)
@@ -20,6 +23,7 @@ class WorkManagerManualSyncQueue @Inject constructor(
 ) : ManualSyncWorkQueue {
     override suspend fun enqueueUnique(name: String, policy: ExistingWorkPolicy) {
         val request = OneTimeWorkRequestBuilder<SnapshotSyncWorker>()
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .setInputData(workDataOf(SnapshotSyncWorker.MANUAL_REFRESH to true))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
@@ -27,8 +31,12 @@ class WorkManagerManualSyncQueue @Inject constructor(
     }
 }
 
-class ManualSyncScheduler @Inject constructor(private val queue: ManualSyncWorkQueue) {
+class ManualSyncScheduler @Inject constructor(
+    private val queue: ManualSyncWorkQueue,
+    private val identity: LocalSnapshotIdentity,
+) {
     suspend fun refresh() {
+        if (identity.currentAccountId() == null) return
         queue.enqueueUnique(WORK_NAME, ExistingWorkPolicy.KEEP)
     }
 

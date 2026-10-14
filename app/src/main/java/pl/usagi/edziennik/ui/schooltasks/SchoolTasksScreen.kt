@@ -54,7 +54,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import pl.usagi.edziennik.domain.SchoolTask
 import pl.usagi.edziennik.domain.SchoolTaskType
-import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.components.EmptyState
 import pl.usagi.edziennik.ui.components.ErrorState
@@ -68,6 +67,7 @@ import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 @Composable
 fun SchoolTasksRoute(
     onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     viewModel: SchoolTasksViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -79,7 +79,7 @@ fun SchoolTasksRoute(
         onNextWeek = viewModel::nextWeek,
         onToday = viewModel::today,
         onRetry = viewModel::retry,
-        onStudentSelected = viewModel::selectStudent,
+        onOpenSettings = onOpenSettings,
         onTargetShown = viewModel::navigationTargetShown,
     )
 }
@@ -92,7 +92,7 @@ private fun SchoolTasksScreen(
     onNextWeek: () -> Unit,
     onToday: () -> Unit,
     onRetry: () -> Unit,
-    onStudentSelected: (Student) -> Unit,
+    onOpenSettings: () -> Unit,
     onTargetShown: () -> Unit,
 ) {
     val spacing = EDziennikTheme.spacing
@@ -101,9 +101,7 @@ private fun SchoolTasksScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             EDziennikTopBar(
-                activeStudent = state.activeStudent,
-                students = state.students,
-                onStudentSelected = onStudentSelected,
+                onOpenSettings = onOpenSettings,
                 showBack = true,
                 onBack = onBack,
             )

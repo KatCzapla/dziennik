@@ -26,6 +26,7 @@ import pl.usagi.edziennik.domain.SchoolTask
 import pl.usagi.edziennik.domain.SchoolTaskDetails
 import pl.usagi.edziennik.domain.SchoolTaskType
 import pl.usagi.edziennik.domain.Student
+import pl.usagi.edziennik.domain.SchoolDayOff
 import pl.usagi.edziennik.domain.SubjectGrades
 import pl.usagi.edziennik.domain.TimetableEntry
 import pl.usagi.edziennik.domain.DashboardInformation
@@ -46,6 +47,96 @@ import java.time.ZoneId
 class DashboardViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+
+    @Test fun noDaysOffAndEmptyPlanKeepExistingDashboardEmptyState() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = FakeTimetableRepository(manager).apply { timetableByDate[today] = emptyList() }
+        val viewModel = daysOffDashboard(repository, manager)
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.showNoLessons)
+        assertTrue(viewModel.uiState.value.selectedDaysOff.isEmpty())
+    }
+
+    @Test fun todayAndTomorrowShowApplicableDaysOffWithoutNoLessonsMessage() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = FakeTimetableRepository(manager).apply {
+            timetableByDate[today] = emptyList()
+            timetableByDate[tomorrow] = emptyList()
+            daysOff = listOf(SchoolDayOff("Dzisiaj wolne", today, today, false, setOf(1220)),
+                SchoolDayOff("Jutro wolne", tomorrow, tomorrow, true, emptySet()))
+        }
+        val viewModel = daysOffDashboard(repository, manager)
+        manager.initialize(listOf(firstStudent.copy(organizationalUnitId = 1220)))
+        advanceUntilIdle()
+        assertEquals(listOf(today to tomorrow), repository.daysOffRequests)
+        assertEquals(listOf("Dzisiaj wolne"), viewModel.uiState.value.selectedDaysOff.map { it.name })
+        assertFalse(viewModel.uiState.value.showNoLessons)
+        viewModel.showTomorrowTimetable()
+        assertEquals(listOf("Jutro wolne"), viewModel.uiState.value.selectedDaysOff.map { it.name })
+        assertFalse(viewModel.uiState.value.showNoLessons)
+    }
+
+    @Test fun multipleDaysOffRemainVisibleWithoutNoLessonsMessage() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = FakeTimetableRepository(manager).apply {
+            timetableByDate[today] = emptyList()
+            daysOff = listOf(
+                SchoolDayOff("Dzień Edukacji Narodowej", today, today, true, emptySet()),
+                SchoolDayOff("Dzień szkoły", today, today, true, emptySet()),
+            )
+        }
+        val viewModel = daysOffDashboard(repository, manager)
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        assertEquals(
+            listOf("Dzień Edukacji Narodowej", "Dzień szkoły"),
+            viewModel.uiState.value.selectedDaysOff.map { it.name },
+        )
+        assertFalse(viewModel.uiState.value.showNoLessons)
+    }
+
+    @Test fun changingStudentReplacesUnitUsedForDaysOff() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = FakeTimetableRepository(manager).apply {
+            daysOff = listOf(SchoolDayOff("Pierwsza", today, today, false, setOf(1220)),
+                SchoolDayOff("Druga", today, today, false, setOf(999)))
+        }
+        val viewModel = daysOffDashboard(repository, manager)
+        manager.initialize(listOf(firstStudent.copy(organizationalUnitId = 1220)))
+        advanceUntilIdle()
+        assertEquals(listOf("Pierwsza"), viewModel.uiState.value.selectedDaysOff.map { it.name })
+        manager.setActiveStudent(secondStudent.copy(organizationalUnitId = 999))
+        advanceUntilIdle()
+        assertEquals(listOf("Druga"), viewModel.uiState.value.selectedDaysOff.map { it.name })
+    }
+
+    @Test fun dayOffAndExistingDashboardLessonsAreBothVisible() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = FakeTimetableRepository(manager).apply {
+            daysOff = listOf(SchoolDayOff("Wolne", today, today, true, emptySet()))
+        }
+        val viewModel = daysOffDashboard(repository, manager)
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        assertEquals(1, viewModel.uiState.value.selectedDaysOff.size)
+        assertEquals(1, viewModel.uiState.value.selectedTimetable.data!!.size)
+    }
+
+    @Test fun daysOffErrorDoesNotReplaceSuccessfullyFetchedDashboardLessons() = runTest {
+        val manager = ActiveStudentManager()
+        val repository = FakeTimetableRepository(manager).apply { daysOffFailure = IllegalStateException("test failure") }
+        val viewModel = daysOffDashboard(repository, manager)
+        manager.initialize(listOf(firstStudent))
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.daysOffFailed)
+        assertEquals(null, viewModel.uiState.value.selectedTimetable.errorMessage)
+        assertEquals(1, viewModel.uiState.value.selectedTimetable.data!!.size)
+    }
+
+    private fun daysOffDashboard(repository: TimetableRepository, manager: ActiveStudentManager) = DashboardViewModel(
+        repository, FakeAttendanceRepository(manager), FakeGradesRepository(), FakeSchoolTasksRepository(manager),
+        FakeMessagesRepository(), manager, fixedClock(), FakeDashboardRepository())
 
     @Test
     fun loadsMultipleInformationEntriesForActiveStudent() = runTest {
@@ -412,6 +503,14 @@ class DashboardViewModelTest {
     private class FakeTimetableRepository(
         private val activeStudentManager: ActiveStudentManager,
     ) : TimetableRepository {
+        var daysOff: List<SchoolDayOff> = emptyList()
+        var daysOffFailure: Exception? = null
+        val daysOffRequests = mutableListOf<Pair<LocalDate, LocalDate>>()
+        override suspend fun getDaysOff(from: LocalDate, to: LocalDate): List<SchoolDayOff> {
+            daysOffRequests += from to to
+            daysOffFailure?.let { throw it }
+            return daysOff
+        }
         val requests = mutableListOf<TimetableRequest>()
         val timetableByDate = mutableMapOf<LocalDate, List<TimetableEntry>>()
         val timetableByStudent = mutableMapOf<String, List<TimetableEntry>>()

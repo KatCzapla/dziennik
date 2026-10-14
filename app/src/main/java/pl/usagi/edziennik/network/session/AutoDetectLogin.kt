@@ -18,6 +18,7 @@ sealed interface AutoDetectLoginResult {
 
     data object InvalidCredentials : AutoDetectLoginResult
     data object TechnicalError : AutoDetectLoginResult
+    data object TransientError : AutoDetectLoginResult
 }
 
 class AutoDetectLogin internal constructor(
@@ -46,11 +47,13 @@ class AutoDetectLogin internal constructor(
                     }
                 }
                 EduVulcanLoginResult.Accepted,
+                EduVulcanLoginResult.TransientError,
                 EduVulcanLoginResult.TechnicalError -> AutoDetectLoginResult.TechnicalError
             }
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
+            authenticationDiagnostic("AUTO_DETECT_AUTH", exception::class.java.simpleName)
             AutoDetectLoginResult.TechnicalError
         }
 
@@ -64,6 +67,7 @@ class AutoDetectLogin internal constructor(
                 is EduVulcanLoginResult.Authenticated ->
                     AutoDetectLoginResult.Success(provider, result.client)
                 EduVulcanLoginResult.InvalidCredentials -> AutoDetectLoginResult.InvalidCredentials
+                EduVulcanLoginResult.TransientError -> AutoDetectLoginResult.TransientError
                 EduVulcanLoginResult.Accepted,
                 EduVulcanLoginResult.TechnicalError -> AutoDetectLoginResult.TechnicalError
             }
@@ -73,6 +77,7 @@ class AutoDetectLogin internal constructor(
                     result.isSuccess -> AutoDetectLoginResult.Success(provider)
                     result.exceptionOrNull() is AuthenticationException.InvalidCredentials ->
                         AutoDetectLoginResult.InvalidCredentials
+                    result.exceptionOrNull()?.isTransientAuthenticationFailure() == true -> AutoDetectLoginResult.TransientError
                     else -> AutoDetectLoginResult.TechnicalError
                 }
             }
@@ -80,6 +85,12 @@ class AutoDetectLogin internal constructor(
     } catch (exception: CancellationException) {
         throw exception
     } catch (exception: Exception) {
-        AutoDetectLoginResult.TechnicalError
+        authenticationDiagnostic("SAVED_PROVIDER_AUTH", exception::class.java.simpleName)
+        if (exception.isTransientAuthenticationFailure()) AutoDetectLoginResult.TransientError else AutoDetectLoginResult.TechnicalError
     }
 }
+
+private fun Throwable.isTransientAuthenticationFailure(): Boolean =
+    this is java.io.IOException || this is AuthenticationException.Network ||
+        this is AuthenticationException.SessionVerificationUnavailable ||
+        (this is AuthenticationException.Http && (statusCode in setOf(408, 429) || statusCode >= 500))

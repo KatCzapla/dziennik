@@ -128,7 +128,7 @@ private fun TimetableContent(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalAlignment = Alignment.End
                         ) {
-                            if (refreshing) {
+                            if (refreshing && !presentation.isLoggedOut) {
                                 Text(
                                     "Odświeżanie...",
                                     style = TextStyle(color = muted, fontSize = 12.sp)
@@ -136,7 +136,7 @@ private fun TimetableContent(
 
                                 Spacer(modifier = GlanceModifier.width(8.dp))
                             }
-                            Image(
+                            if (!presentation.isLoggedOut) Image(
                                 provider = ImageProvider(R.drawable.ic_widget_refresh),
                                 contentDescription = "Odśwież plan",
                                 colorFilter = ColorFilter.tint(muted),

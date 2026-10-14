@@ -44,11 +44,107 @@ import pl.usagi.edziennik.persistence.changes.SnapshotWrite
 import pl.usagi.edziennik.background.SyncScheduler
 import androidx.work.ExistingPeriodicWorkPolicy
 import pl.usagi.edziennik.background.PeriodicSyncScheduler
+import pl.usagi.edziennik.widget.WidgetUpdater
+import pl.usagi.edziennik.widget.LocalWidgetsUpdater
+import pl.usagi.edziennik.widget.TimetableWidgetUpdater
+import pl.usagi.edziennik.widget.TasksWidgetUpdater
+import pl.usagi.edziennik.widget.TodayTimetableContentReader
+import pl.usagi.edziennik.widget.UpcomingTasksContentReader
+import pl.usagi.edziennik.widget.TodayTimetablePresentation
+import pl.usagi.edziennik.widget.UpcomingTasksPresentation
+import pl.usagi.edziennik.persistence.changes.LocalTimetableReader
+import pl.usagi.edziennik.persistence.changes.LocalTasksReader
+import pl.usagi.edziennik.persistence.changes.SnapshotSyncManager
+import pl.usagi.edziennik.persistence.changes.CurrentSnapshotData
+import pl.usagi.edziennik.persistence.changes.SyncCompleteness
+import pl.usagi.edziennik.persistence.changes.taskSnapshotWeeks
+import pl.usagi.edziennik.domain.changes.SnapshotArea
+import pl.usagi.edziennik.domain.SchoolTask
+import pl.usagi.edziennik.domain.SchoolTaskDetails
+import pl.usagi.edziennik.domain.SchoolTaskType
+import pl.usagi.edziennik.domain.TimetableEntry
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.decodeFromString
+import pl.usagi.edziennik.dto.ContextDto
+import pl.usagi.edziennik.mapper.toDomainStudents
+import java.time.Clock
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LoginViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+
+    @Test fun bothProvidersCanLogInWithContextUnitIdMissingNullOrNumeric() = runTest {
+        for (provider in AuthenticationProvider.entries) {
+            for (field in listOf("", ",\"idJednostkaSkladowa\":null", ",\"idJednostkaSkladowa\":1220")) {
+                val current = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+                val session = FakeSessionManager(isSessionValidResult = true)
+                val auth = AutoDetectLogin(
+                    authenticateEduVulcan = { _, _ ->
+                        if (provider == AuthenticationProvider.EDUVULCAN) EduVulcanLoginResult.Authenticated(OkHttpClient())
+                        else EduVulcanLoginResult.InvalidCredentials
+                    },
+                    loginProjectUonet = session::login,
+                )
+                val vm = createViewModel(sessionManager = session, currentSession = current,
+                    autoDetectLogin = auth, studentRepository = contextRepository(field))
+                advanceUntilIdle()
+                vm.onLoginChanged("test")
+                vm.onPasswordChanged("test")
+                vm.login()
+                advanceUntilIdle()
+                assertTrue(vm.uiState.value.isSessionValid)
+                assertFalse(vm.uiState.value.isLoadingStudents)
+                assertNull(vm.uiState.value.errorMessage)
+                assertEquals(provider, current.provider)
+                assertEquals(if (field.contains("1220")) 1220 else null, vm.uiState.value.activeStudent!!.organizationalUnitId)
+            }
+        }
+    }
+
+    @Test fun savedSessionsRestoreWithContextUnitIdForBothProviders() = runTest {
+        for (provider in AuthenticationProvider.entries) {
+            val current = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+            val vm = createViewModel(sessionManager = FakeSessionManager(validatePersistedSessionResult = true),
+                autoLoginSettings = FakeAutoLoginSettings(provider = provider), currentSession = current,
+                studentRepository = contextRepository(",\"idJednostkaSkladowa\":1220"))
+            advanceUntilIdle()
+            assertTrue(vm.uiState.value.isSessionValid)
+            assertEquals(provider, current.provider)
+            assertEquals(1220, vm.uiState.value.activeStudent!!.organizationalUnitId)
+        }
+    }
+
+    @Test fun multipleContextStudentsKeepSessionValidAndCanBeSelected() = runTest {
+        val vm = createViewModel(sessionManager = FakeSessionManager(validatePersistedSessionResult = true),
+            studentRepository = contextRepository(",\"idJednostkaSkladowa\":1220", multiple = true))
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.isSessionValid)
+        assertEquals(2, vm.uiState.value.students.size)
+        assertNull(vm.uiState.value.activeStudent)
+        vm.selectStudent(vm.uiState.value.students.last())
+        advanceUntilIdle()
+        assertEquals(999, vm.uiState.value.activeStudent!!.organizationalUnitId)
+    }
+
+    @Test fun contextDecodingFailureDoesNotProduceAuthenticationTechnicalError() = runTest {
+        val vm = createViewModel(sessionManager = FakeSessionManager(validatePersistedSessionResult = true),
+            studentRepository = contextRepository(",\"idJednostkaSkladowa\":{}"))
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.isSessionValid)
+        assertEquals("Nie udało się pobrać danych ucznia.", vm.uiState.value.errorMessage)
+    }
+
+    private fun contextRepository(field: String, multiple: Boolean = false) = object : StudentRepository {
+        override suspend fun getStudents(): List<Student> {
+            val second = if (multiple) "," + """{"key":"other-runtime","idDziennik":2,"uczen":"Drugi uczeń","oddzial":"2A","jednostka":"Szkoła","idJednostkaSkladowa":999}""" else ""
+            val body = """{"uczniowie":[{"key":"runtime","idDziennik":1,"uczen":"Uczeń","oddzial":"1A","jednostka":"Szkoła"$field}$second]}"""
+            return Json { ignoreUnknownKeys = true; explicitNulls = false }.decodeFromString<ContextDto>(body).students.toDomainStudents()
+        }
+    }
 
     @Test
     fun validSessionDoesNotReadCredentialsOrLoginAgain() = runTest {
@@ -561,6 +657,169 @@ class LoginViewModelTest {
         assertEquals(1, scheduler.cancelCalls)
     }
 
+    @Test fun logoutRedrawsBothWidgetsWithoutOldDataBeforeDeletingSnapshots() = runTest {
+        val fixture = WidgetFixture()
+        fixture.seed()
+        fixture.updater.update()
+        assertEquals("Stary przedmiot", fixture.timetableViews.last().lessons.single().subject)
+        assertEquals("Stary opis", fixture.taskViews.last().items.single().description)
+        val viewModel = widgetViewModel(fixture)
+        advanceUntilIdle()
+        fixture.snapshots.onDelete = {
+            assertNull(fixture.identity.currentAccountId())
+            fixture.assertSignedOut()
+            assertTrue(fixture.snapshots.payloads.isNotEmpty())
+        }
+        viewModel.clearSession()
+        advanceUntilIdle()
+        fixture.assertSignedOut()
+        assertTrue(fixture.snapshots.payloads.isEmpty())
+    }
+
+    @Test fun roomDeletionFailureStillClearsBothWidgetViewsAndDoesNotReadOldRows() = runTest {
+        val fixture = WidgetFixture()
+        fixture.seed()
+        fixture.updater.update()
+        val viewModel = widgetViewModel(fixture)
+        advanceUntilIdle()
+        val readsBeforeLogout = fixture.snapshots.reads
+        fixture.snapshots.failDelete = true
+        viewModel.clearSession()
+        advanceUntilIdle()
+        fixture.assertSignedOut()
+        assertTrue(fixture.snapshots.payloads.isNotEmpty())
+        assertEquals(readsBeforeLogout, fixture.snapshots.reads)
+        assertFalse(viewModel.uiState.value.isSessionValid)
+    }
+
+    @Test fun processRestartAfterLogoutCannotRestoreOrphanedSnapshots() = runTest {
+        val fixture = WidgetFixture()
+        fixture.seed()
+        val viewModel = widgetViewModel(fixture)
+        advanceUntilIdle()
+        fixture.snapshots.failDelete = true
+        viewModel.clearSession()
+        advanceUntilIdle()
+        val restoredIdentity = LocalSnapshotIdentity(fixture.identityStore)
+        assertNull(restoredIdentity.currentAccountId())
+        val plan = TodayTimetableContentReader(LocalTimetableReader(fixture.snapshots, restoredIdentity, Json, fixture.clock))
+            .read(fixture.clock.instant(), fixture.clock.zone)
+        val tasks = UpcomingTasksContentReader(LocalTasksReader(fixture.snapshots, restoredIdentity, Json, fixture.clock))
+            .read(fixture.clock.instant(), fixture.clock.zone)
+        assertTrue(plan.isLoggedOut)
+        assertTrue(tasks.isLoggedOut)
+        assertTrue(plan.lessons.isEmpty())
+        assertTrue(tasks.items.isEmpty())
+        assertNull(plan.lastCompleteLabel)
+        assertNull(tasks.lastCompleteLabel)
+    }
+
+    @Test fun loggingInAgainCannotDisplayPreviousAccountsRowsEvenIfDeletionFailed() = runTest {
+        val fixture = WidgetFixture()
+        fixture.seed()
+        val oldId = fixture.identity.currentAccountId()
+        val viewModel = widgetViewModel(fixture)
+        advanceUntilIdle()
+        fixture.snapshots.failDelete = true
+        viewModel.clearSession()
+        advanceUntilIdle()
+        viewModel.onLoginChanged("new-user")
+        viewModel.onPasswordChanged("new-password")
+        viewModel.login()
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.isSessionValid)
+        assertNotEquals(oldId, fixture.identity.currentAccountId())
+        assertTrue(fixture.timetableViews.last().lessons.isEmpty())
+        assertTrue(fixture.taskViews.last().items.isEmpty())
+        assertFalse(fixture.timetableViews.last().isLoggedOut)
+        assertFalse(fixture.taskViews.last().isLoggedOut)
+        fixture.identity.selectStudent(1)
+        fixture.updater.update()
+        assertTrue(fixture.timetableViews.last().lessons.isEmpty())
+        assertTrue(fixture.taskViews.last().items.isEmpty())
+        fixture.seed("Nowy przedmiot", "Nowy opis")
+        fixture.updater.update()
+        assertEquals("Nowy przedmiot", fixture.timetableViews.last().lessons.single().subject)
+        assertEquals("Nowy opis", fixture.taskViews.last().items.single().description)
+        assertTrue(fixture.snapshots.payloads.keys.any { it.startsWith(oldId!!.value) })
+    }
+
+    @Test fun widgetRefreshFailureDoesNotStopLogoutAndIdentityInvalidation() = runTest {
+        val fixture = WidgetFixture()
+        fixture.seed()
+        val session = FakeSessionManager(validatePersistedSessionResult = true)
+        val viewModel = createViewModel(sessionManager = session, localSnapshotIdentity = fixture.identity,
+            snapshotStore = fixture.snapshots, widgetUpdater = WidgetUpdater { error("Launcher error") })
+        advanceUntilIdle()
+        viewModel.clearSession()
+        advanceUntilIdle()
+        assertNull(fixture.identity.currentAccountId())
+        assertTrue(session.clearSessionCalled)
+        assertFalse(viewModel.uiState.value.isSessionValid)
+    }
+
+    @Test fun logoutWhileSnapshotReadIsInFlightReturnsSignedOutRatherThanOldData() = runTest {
+        val fixture = WidgetFixture()
+        fixture.seed()
+        fixture.snapshots.onRead = { fixture.identity.clearAccount() }
+        val plan = fixture.plan.read(fixture.clock.instant(), fixture.clock.zone)
+        assertTrue(plan.isLoggedOut)
+        assertTrue(plan.lessons.isEmpty())
+        assertNull(plan.lastCompleteLabel)
+        val tasks = fixture.tasks.read(fixture.clock.instant(), fixture.clock.zone)
+        assertTrue(tasks.isLoggedOut)
+        assertTrue(tasks.items.isEmpty())
+    }
+
+    private fun widgetViewModel(fixture: WidgetFixture) = createViewModel(
+        sessionManager = FakeSessionManager(validatePersistedSessionResult = true, isSessionValidResult = true),
+        localSnapshotIdentity = fixture.identity, snapshotStore = fixture.snapshots, widgetUpdater = fixture.updater,
+    )
+
+    private class WidgetFixture {
+        val date = LocalDate.of(2026, 10, 12)
+        val clock = Clock.fixed(date.atTime(12, 0).atZone(ZoneId.of("Europe/Warsaw")).toInstant(), ZoneId.of("Europe/Warsaw"))
+        val identityStore = FakeLocalIdentityStore()
+        val identity = LocalSnapshotIdentity(identityStore).apply { ensureAccountId(); selectStudent(1) }
+        val snapshots = FakeSnapshotStore()
+        val plan = TodayTimetableContentReader(LocalTimetableReader(snapshots, identity, Json, clock))
+        val tasks = UpcomingTasksContentReader(LocalTasksReader(snapshots, identity, Json, clock))
+        val timetableViews = mutableListOf<TodayTimetablePresentation>()
+        val taskViews = mutableListOf<UpcomingTasksPresentation>()
+        val updater = LocalWidgetsUpdater(
+            TimetableWidgetUpdater { timetableViews += plan.read(clock.instant(), clock.zone) },
+            TasksWidgetUpdater { taskViews += tasks.read(clock.instant(), clock.zone) },
+        )
+
+        suspend fun seed(subject: String = "Stary przedmiot", description: String = "Stary opis") {
+            val manager = SnapshotSyncManager(snapshots, Json, identity, clock)
+            val week = taskSnapshotWeeks(date).first()
+            manager.sync(SnapshotScope(identity.currentAccountId()!!, identity.selectedStudentScopeId(),
+                SnapshotArea.TIMETABLE, week.scopeRange), SyncCompleteness.Complete,
+                CurrentSnapshotData.Timetable(listOf(TimetableEntry(date, null, LocalTime.of(9, 0),
+                    LocalTime.of(9, 45), subject, null, room = "215", changes = emptyList()))))
+            for (taskWeek in taskSnapshotWeeks(date)) {
+                val items = if (date in taskWeek.from..taskWeek.to) listOf(SchoolTask(SchoolTaskType.Homework,
+                    4, date, subject, false, 7, SchoolTaskDetails(description, null, null))) else emptyList()
+                manager.sync(SnapshotScope(identity.currentAccountId()!!, identity.selectedStudentScopeId(),
+                    SnapshotArea.TASKS, taskWeek.scopeRange), SyncCompleteness.Complete, CurrentSnapshotData.Tasks(items, true))
+            }
+        }
+
+        fun assertSignedOut() {
+            val plan = timetableViews.last()
+            val tasks = taskViews.last()
+            assertEquals("Zaloguj się, aby zobaczyć plan lekcji", plan.message)
+            assertEquals("Zaloguj się, aby zobaczyć sprawdziany i zadania", tasks.message)
+            assertTrue(plan.isLoggedOut)
+            assertTrue(tasks.isLoggedOut)
+            assertTrue(plan.lessons.isEmpty())
+            assertTrue(tasks.items.isEmpty())
+            assertNull(plan.lastCompleteLabel)
+            assertNull(tasks.lastCompleteLabel)
+        }
+    }
+
     @Test
     fun repeatedSchedulingUsesUniqueKeepPolicy() {
         assertEquals("snapshot_sync", PeriodicSyncScheduler.WORK_NAME)
@@ -603,6 +862,7 @@ class LoginViewModelTest {
         localSnapshotIdentity: LocalSnapshotIdentity = LocalSnapshotIdentity(FakeLocalIdentityStore()),
         snapshotStore: SnapshotStore = FakeSnapshotStore(),
         syncScheduler: SyncScheduler = FakeSyncScheduler(),
+        widgetUpdater: WidgetUpdater = WidgetUpdater {},
     ) = LoginViewModel(
         sessionManager = sessionManager,
         autoDetectLogin = autoDetectLogin,
@@ -615,6 +875,7 @@ class LoginViewModelTest {
         localSnapshotIdentity = localSnapshotIdentity,
         snapshotStore = snapshotStore,
         syncScheduler = syncScheduler,
+        widgetUpdater = widgetUpdater,
     )
 
     private class FakeSyncScheduler : SyncScheduler {
@@ -633,10 +894,27 @@ class LoginViewModelTest {
 
     private class FakeSnapshotStore : SnapshotStore {
         val deletedAccounts = mutableListOf<LocalAccountId>()
-        override suspend fun read(scope: SnapshotScope): String? = null
-        override suspend fun update(scope: SnapshotScope, transform: (String?) -> SnapshotWrite): List<ChangeEvent> =
-            transform(null).events
-        override suspend fun deleteAccount(accountId: LocalAccountId) { deletedAccounts += accountId }
+        val payloads = mutableMapOf<String, String>()
+        var failDelete = false
+        var reads = 0
+        var onDelete: (() -> Unit)? = null
+        var onRead: (() -> Unit)? = null
+        override suspend fun read(scope: SnapshotScope): String? {
+            reads++
+            onRead?.also { onRead = null }?.invoke()
+            return payloads[scope.storageKey]
+        }
+        override suspend fun update(scope: SnapshotScope, transform: (String?) -> SnapshotWrite): List<ChangeEvent> {
+            val write = transform(payloads[scope.storageKey])
+            write.payload?.let { payloads[scope.storageKey] = it }
+            return write.events
+        }
+        override suspend fun deleteAccount(accountId: LocalAccountId) {
+            deletedAccounts += accountId
+            onDelete?.invoke()
+            if (failDelete) error("Delete failed")
+            payloads.keys.removeAll { it.startsWith(accountId.value) }
+        }
     }
 
     private class FakeMessagesRepository(

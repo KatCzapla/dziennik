@@ -65,6 +65,11 @@ class LocalSnapshotIdentity @Inject constructor(private val store: LocalIdentity
     @Synchronized
     fun clearAccount(): LocalAccountId? = currentAccountId().also { store.clear() }
 
+    // Linearize notify() with logout: no publication can begin after identity invalidation.
+    @Synchronized
+    fun ifCurrentAccount(accountId: LocalAccountId, action: () -> Boolean): Boolean =
+        currentAccountId() == accountId && action()
+
     private companion object {
         const val ACCOUNT_ID = "account_id"
         const val SELECTED_STUDENT = "selected_student"

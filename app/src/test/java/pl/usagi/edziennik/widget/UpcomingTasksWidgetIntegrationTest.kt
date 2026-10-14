@@ -5,7 +5,7 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import pl.usagi.edziennik.background.ChangeNotifier
+import pl.usagi.edziennik.background.PendingNotificationPublisher
 import pl.usagi.edziennik.background.ManualWidgetSyncRun
 import pl.usagi.edziennik.background.PeriodicSyncRun
 import pl.usagi.edziennik.domain.SchoolTask
@@ -124,7 +124,7 @@ class UpcomingTasksWidgetIntegrationTest {
                 return OneShotSyncResult(emptyList(), emptyMap())
             }
         }
-        val notifier = object : ChangeNotifier { override fun publish(events: List<ChangeEvent>) = Unit }
+        val notifier = PendingNotificationPublisher { }
         val updater = LocalWidgetsUpdater(TimetableWidgetUpdater { timetableUpdates++ }, tasksUpdater)
         ManualWidgetSyncRun(PeriodicSyncRun({ true }, sync, notifier), updater).run()
         assertEquals(1, syncCalls)

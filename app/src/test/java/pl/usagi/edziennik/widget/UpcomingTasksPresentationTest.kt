@@ -17,6 +17,14 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 class UpcomingTasksPresentationTest {
+    @Test fun loggedOutCannotExposeTasksOrTimestampsFromOldPresentationInput() {
+        val shown = present(result(listOf(task())).copy(isLoggedOut = true))
+        assertEquals("Zaloguj się, aby zobaczyć sprawdziany i zadania", shown.message)
+        assertTrue(shown.isLoggedOut)
+        assertTrue(shown.items.isEmpty())
+        assertNull(shown.lastCompleteLabel)
+    }
+
     private val date = LocalDate.of(2026, 10, 12)
     private val zone = ZoneId.of("Europe/Warsaw")
     private val timestamp = Instant.parse("2026-10-12T08:00:00Z")

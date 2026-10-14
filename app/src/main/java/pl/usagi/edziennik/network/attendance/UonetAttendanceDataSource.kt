@@ -116,7 +116,7 @@ sealed class AttendanceFetchException(
 ) : Exception(message, cause) {
     class Network(cause: Throwable) : AttendanceFetchException("Could not fetch UONET+ attendance.", cause)
 
-    class Http(statusCode: Int) : AttendanceFetchException("UONET+ attendance request failed with HTTP $statusCode.")
+    class Http(val statusCode: Int) : AttendanceFetchException("UONET+ attendance request failed with HTTP $statusCode.")
 
     data object UnexpectedResponse : AttendanceFetchException("UONET+ attendance response did not match the expected contract.")
 }

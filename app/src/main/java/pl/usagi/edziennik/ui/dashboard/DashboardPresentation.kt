@@ -15,18 +15,20 @@ import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
 import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 
-fun dashboardGreeting(name: String?): String =
+fun dashboardGreetingName(name: String?): String? =
     name?.trim()
         ?.split(Regex("\\s+"))
         ?.getOrNull(1)
         ?.takeIf(String::isNotEmpty)
-        ?.let { "Dzień dobry, $it" }
-        ?: "Dzień dobry"
+
+fun dashboardGreeting(name: String?): String =
+    dashboardGreetingName(name)?.let { "Dzień dobry, $it" } ?: "Dzień dobry"
 
 data class DashboardLesson(
     val startTime: String,
@@ -34,6 +36,11 @@ data class DashboardLesson(
     val room: String?,
     val isCurrent: Boolean,
     val isCancelled: Boolean,
+    val date: LocalDate? = null,
+    val slotStart: LocalTime? = null,
+    val slotEnd: LocalTime? = null,
+    val isSubstitution: Boolean = false,
+    val attendanceStatus: AttendanceStatus? = null,
 )
 
 data class DashboardGrade(
@@ -47,6 +54,10 @@ data class DashboardAttendanceEntry(
     val startTime: String,
     val subject: String,
     val statusLabel: String,
+    val date: LocalDate? = null,
+    val slotStart: LocalTime? = null,
+    val slotEnd: LocalTime? = null,
+    val status: AttendanceStatus? = null,
 )
 
 data class DashboardTask(
@@ -70,6 +81,12 @@ fun List<TimetableEntry>.toDashboardLessons(
                 room = entry.room,
                 isCurrent = entry.isCurrentLesson(displayedDate, now),
                 isCancelled = entry.isCancelled,
+                date = entry.date,
+                slotStart = entry.startTime,
+                slotEnd = entry.endTime,
+                isSubstitution = entry.changes.any {
+                    it.kind == pl.usagi.edziennik.domain.TimetableChangeKind.Substitution
+                },
             )
         }
 
@@ -109,8 +126,25 @@ fun List<AttendanceEntry>.toDashboardAttendanceEntries(
                 startTime = entry.startTime.format(timeFormatter),
                 subject = entry.subject ?: "Zajęcia",
                 statusLabel = entry.status.dashboardLabel(),
+                date = entry.date,
+                slotStart = entry.startTime,
+                slotEnd = entry.endTime,
+                status = entry.status,
             )
         }
+
+fun List<DashboardLesson>.withAttendance(
+    attendance: List<DashboardAttendanceEntry>,
+): List<DashboardLesson> = map { lesson ->
+    val matches = attendance.filter {
+        lesson.date != null && lesson.slotStart != null && lesson.slotEnd != null &&
+            it.date == lesson.date && it.slotStart == lesson.slotStart && it.slotEnd == lesson.slotEnd
+    }
+    val uniqueLesson = count {
+        it.date == lesson.date && it.slotStart == lesson.slotStart && it.slotEnd == lesson.slotEnd
+    } == 1
+    lesson.copy(attendanceStatus = if (uniqueLesson) matches.singleOrNull()?.status else null)
+}
 
 fun List<SchoolTask>.toDashboardTasks(
     today: LocalDate,

@@ -64,7 +64,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import pl.usagi.edziennik.domain.MessageAttachment
 import pl.usagi.edziennik.domain.MessageDetails
 import pl.usagi.edziennik.domain.MessageMailboxType
-import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 import java.time.LocalDate
@@ -74,6 +73,7 @@ import java.net.URLConnection
 @Composable
 fun MessagesRoute(
     onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
     viewModel: MessagesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -81,7 +81,7 @@ fun MessagesRoute(
     MessagesScreen(
         state = state,
         onBack = onBack,
-        onStudentSelected = viewModel::selectStudent,
+        onOpenSettings = onOpenSettings,
         onRetryInitial = viewModel::retryInitialLoad,
         onLoadMore = viewModel::loadNextPage,
         onRetryNextPage = viewModel::retryNextPage,
@@ -98,7 +98,7 @@ fun MessagesRoute(
 private fun MessagesScreen(
     state: MessagesUiState,
     onBack: () -> Unit,
-    onStudentSelected: (Student) -> Unit,
+    onOpenSettings: () -> Unit,
     onRetryInitial: () -> Unit,
     onLoadMore: () -> Unit,
     onRetryNextPage: () -> Unit,
@@ -117,9 +117,7 @@ private fun MessagesScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             EDziennikTopBar(
-                activeStudent = state.activeStudent,
-                students = state.students,
-                onStudentSelected = onStudentSelected,
+                onOpenSettings = onOpenSettings,
                 showBack = true,
                 onBack = if (isShowingDetails) onDetailsClosed else onBack,
             )

@@ -30,6 +30,7 @@ class UonetSchoolTasksRepository @Inject constructor(
         val zoneId = ZoneId.systemDefault()
 
         val failedDetailKeys = mutableSetOf<TaskKey>()
+        val detailFailures = mutableMapOf<TaskKey, Exception>()
         val tasks = dataSource.getSchoolTasks(
             studentKey = activeStudent.key,
             dateFrom = from.toApiStartOfDay(zoneId),
@@ -38,11 +39,12 @@ class UonetSchoolTasksRepository @Inject constructor(
             .map { task ->
                 val details = getDetailsSafely(studentKey = activeStudent.key, task = task)
                 if (details.failed) failedDetailKeys += TaskKey(task.rawType, task.id)
+                details.failure?.let { detailFailures[TaskKey(task.rawType, task.id)] = it }
                 task.copy(
                     details = details.value,
                 )
             }
-        return SchoolTasksFetchResult(tasks, failedDetailKeys)
+        return SchoolTasksFetchResult(tasks, failedDetailKeys, detailFailures)
     }
 
     private suspend fun getDetailsSafely(
@@ -62,10 +64,10 @@ class UonetSchoolTasksRepository @Inject constructor(
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            TaskDetailsFetch(null, failed = true)
+            TaskDetailsFetch(null, failed = true, failure = exception)
         }
 
-    private data class TaskDetailsFetch(val value: SchoolTaskDetails?, val failed: Boolean)
+    private data class TaskDetailsFetch(val value: SchoolTaskDetails?, val failed: Boolean, val failure: Exception? = null)
 }
 
 sealed class SchoolTasksRepositoryException(message: String) : Exception(message) {

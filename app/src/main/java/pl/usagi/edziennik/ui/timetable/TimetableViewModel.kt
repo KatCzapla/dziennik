@@ -44,6 +44,7 @@ class TimetableViewModel @Inject constructor(
     val uiState: StateFlow<TimetableUiState> = _uiState.asStateFlow()
     private var loadedWeek: WeekRange? = null
     private var loadingJob: Job? = null
+    private var daysOffJob: Job? = null
     private var loadId = 0L
 
     init {
@@ -98,11 +99,15 @@ class TimetableViewModel @Inject constructor(
         viewModelScope.launch {
             activeStudentManager.activeStudent.collect { student ->
                 loadingJob?.cancel()
+                daysOffJob?.cancel()
                 loadId++
                 loadedWeek = null
                 _uiState.update { state ->
                     state.copy(
                         activeStudent = student,
+                        daysOff = emptyList(),
+                        daysOffLoading = false,
+                        daysOffFailed = false,
                         entries = if (student == null) emptyList() else state.entries,
                         isLoading = false,
                         errorMessage = if (student == null) {
@@ -123,10 +128,14 @@ class TimetableViewModel @Inject constructor(
         val student = _uiState.value.activeStudent
         if (student == null) {
             loadingJob?.cancel()
+            daysOffJob?.cancel()
             loadId++
             _uiState.update { state ->
                 state.copy(
                     entries = emptyList(),
+                    daysOff = emptyList(),
+                    daysOffLoading = false,
+                    daysOffFailed = false,
                     isLoading = false,
                     errorMessage = "Wybierz ucznia, aby zobaczyć plan zajęć.",
                 )
@@ -140,6 +149,24 @@ class TimetableViewModel @Inject constructor(
         val requestId = ++loadId
         val from = week.clampedSchoolWeekStart(schoolYearRange)
         val to = week.clampedSchoolWeekEnd(schoolYearRange)
+        daysOffJob?.cancel()
+        _uiState.update { it.copy(daysOff = emptyList(), daysOffLoading = true, daysOffFailed = false) }
+        daysOffJob = viewModelScope.launch {
+            try {
+                val daysOff = timetableRepository.getDaysOff(from, to)
+                if (loadId == requestId && activeStudentManager.activeStudent.value == student &&
+                    _uiState.value.displayedWeek == week) {
+                    _uiState.update { it.copy(daysOff = daysOff, daysOffLoading = false) }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (loadId == requestId && activeStudentManager.activeStudent.value == student &&
+                    _uiState.value.displayedWeek == week) {
+                    _uiState.update { it.copy(daysOffLoading = false, daysOffFailed = true) }
+                }
+            }
+        }
         val snapshotScope = localIdentity.currentAccountId()?.let { accountId ->
             SnapshotScope(accountId, localIdentity.studentScopeId(student.diaryId), SnapshotArea.TIMETABLE, "$from/$to")
         }

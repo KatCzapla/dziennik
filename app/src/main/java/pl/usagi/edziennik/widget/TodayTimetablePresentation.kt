@@ -11,6 +11,7 @@ data class TodayTimetablePresentation(
     val lessons: List<TodayLesson>,
     val message: String?,
     val lastCompleteLabel: String?,
+    val isLoggedOut: Boolean = false,
 )
 
 data class TodayLesson(
@@ -33,6 +34,9 @@ fun presentTodayTimetable(
 ): TodayTimetablePresentation {
     val dateLabel = date.format(dateFormat)
     return when (result) {
+        LocalTimetableResult.LoggedOut -> TodayTimetablePresentation(
+            dateLabel, emptyList(), "Zaloguj się, aby zobaczyć plan lekcji", null, isLoggedOut = true,
+        )
         LocalTimetableResult.NoBaseline -> TodayTimetablePresentation(
             dateLabel, emptyList(), "Plan nie został jeszcze zsynchronizowany.", null,
         )

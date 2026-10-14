@@ -40,7 +40,11 @@ class UonetSessionManager @Inject constructor(
                     currentUrl = startUrl,
                     username = username,
                     password = password,
-                ) ?: throw AuthenticationException.LoginFormNotFound()
+                    onFailure = { reason -> authenticationDiagnostic("PROJECT_UONET_LOGIN_FORM", reason.name) },
+                ) ?: run {
+                    authenticationDiagnostic("PROJECT_UONET_LOGIN_PAGE", response.safeLoginPageDiagnostic())
+                    throw AuthenticationException.LoginFormNotFound()
+                }
             }
 
             val loginResponse = executeFormPost(loginForm, referer = startUrl)
@@ -58,13 +62,18 @@ class UonetSessionManager @Inject constructor(
                 }
             }
 
-            if (!isSessionValid()) {
-                throw AuthenticationException.SessionNotActive()
+            when (checkSession()) {
+                SessionCheck.VALID -> Unit
+                SessionCheck.TRANSPORT_ERROR, SessionCheck.SERVER_ERROR ->
+                    throw AuthenticationException.SessionVerificationUnavailable()
+                else -> throw AuthenticationException.SessionNotActive()
             }
         }
     }
 
-    override suspend fun isSessionValid(): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun isSessionValid(): Boolean = checkSession() == SessionCheck.VALID
+
+    override suspend fun checkSession(): SessionCheck = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(CONTEXT_URL)
             .header("Accept", ACCEPT_JSON)
@@ -73,28 +82,33 @@ class UonetSessionManager @Inject constructor(
 
         try {
             okHttpClient.newCall(request).execute().use { response ->
-                if (response.code != 200) return@withContext false
-                if (!response.isJson()) return@withContext false
+                if (response.code == 401) return@withContext SessionCheck.EXPIRED
+                if (response.code in setOf(408, 429) || response.code >= 500) return@withContext SessionCheck.SERVER_ERROR
+                val finalUrl = response.request.url
+                val loginRedirect = (finalUrl.host == LOGIN_HOST && finalUrl.encodedPath.contains("/LoginPage.aspx")) ||
+                    (finalUrl.host == "eduvulcan.pl" && finalUrl.encodedPath.startsWith("/logowanie"))
+                if (loginRedirect) return@withContext SessionCheck.EXPIRED
+                if (response.code != 200 || !response.isJson()) return@withContext SessionCheck.INVALID_RESPONSE
 
                 val body = response.body.string()
                 val root = json.parseToJsonElement(body).jsonObject
-                "uczniowie" in root
+                if ("uczniowie" in root) SessionCheck.VALID else SessionCheck.INVALID_RESPONSE
             }
         } catch (exception: IOException) {
-            false
+            SessionCheck.TRANSPORT_ERROR
         } catch (exception: SerializationException) {
-            false
+            SessionCheck.INVALID_RESPONSE
         } catch (exception: IllegalArgumentException) {
-            false
+            SessionCheck.INVALID_RESPONSE
         }
     }
 
     override suspend fun validatePersistedSession(): Boolean {
-        val isValid = isSessionValid()
-        if (!isValid) {
+        val result = checkSession()
+        if (result == SessionCheck.EXPIRED) {
             clearSession()
         }
-        return isValid
+        return result == SessionCheck.VALID
     }
 
     override suspend fun clearSession() = withContext(Dispatchers.IO) {
@@ -156,6 +170,7 @@ class UonetSessionManager @Inject constructor(
             block()
             Result.success(Unit)
         } catch (exception: AuthenticationException) {
+            authenticationDiagnostic("PROJECT_UONET_AUTH", exception::class.java.simpleName)
             Result.failure(exception)
         }
 
