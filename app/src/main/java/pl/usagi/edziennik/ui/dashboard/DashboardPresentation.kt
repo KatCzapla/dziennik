@@ -8,6 +8,8 @@ import pl.usagi.edziennik.domain.SchoolTask
 import pl.usagi.edziennik.domain.SchoolTaskType
 import pl.usagi.edziennik.domain.TimetableEntry
 import pl.usagi.edziennik.ui.attendance.label
+import pl.usagi.edziennik.ui.timetable.TimetableBlock
+import pl.usagi.edziennik.ui.timetable.toTimetableBlocks
 import pl.usagi.edziennik.ui.grades.recentGrades
 import pl.usagi.edziennik.ui.schooltasks.typeLabel
 import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
@@ -41,6 +43,7 @@ data class DashboardLesson(
     val slotEnd: LocalTime? = null,
     val isSubstitution: Boolean = false,
     val attendanceStatus: AttendanceStatus? = null,
+    val block: TimetableBlock? = null,
 )
 
 data class DashboardGrade(
@@ -74,11 +77,14 @@ fun List<TimetableEntry>.toDashboardLessons(
 ): List<DashboardLesson> =
     filter { it.date == displayedDate }
         .sortedBy { it.startTime }
-        .map { entry ->
+        .toTimetableBlocks()
+        .map { block ->
+            val entry = block.primary
             DashboardLesson(
                 startTime = entry.startTime.format(timeFormatter),
                 subject = entry.subject,
                 room = entry.room,
+                block = block.takeIf { it.additional != null },
                 isCurrent = entry.isCurrentLesson(displayedDate, now),
                 isCancelled = entry.isCancelled,
                 date = entry.date,
@@ -143,7 +149,7 @@ fun List<DashboardLesson>.withAttendance(
     val uniqueLesson = count {
         it.date == lesson.date && it.slotStart == lesson.slotStart && it.slotEnd == lesson.slotEnd
     } == 1
-    lesson.copy(attendanceStatus = if (uniqueLesson) matches.singleOrNull()?.status else null)
+    lesson.copy(attendanceStatus = if (uniqueLesson && lesson.block?.additional == null) matches.singleOrNull()?.status else null)
 }
 
 fun List<SchoolTask>.toDashboardTasks(

@@ -5,6 +5,8 @@ sealed class AuthenticationException(
     cause: Throwable? = null,
 ) : Exception(message, cause) {
     class LoginFormNotFound : AuthenticationException("Login form was not found.")
+    class UnsafeFederationDestination : AuthenticationException("Untrusted authentication destination.")
+    class WsFederationCycleDetected : AuthenticationException("WS-Federation cycle detected.")
 
     class InvalidCredentials : AuthenticationException("Login credentials were rejected.")
 

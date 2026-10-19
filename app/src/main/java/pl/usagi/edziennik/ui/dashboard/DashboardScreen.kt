@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
@@ -75,7 +77,9 @@ import pl.usagi.edziennik.ui.messages.dashboardUnreadBadgeLabel
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
 import pl.usagi.edziennik.ui.navigation.SchoolTaskNavigationTarget
+import pl.usagi.edziennik.ui.theme.EDziennikTheme.spacing
 import pl.usagi.edziennik.ui.timetable.dayMonthLabel
+import pl.usagi.edziennik.ui.timetable.TimetableBlockContent
 
 @Composable
 fun DashboardRoute(
@@ -140,8 +144,15 @@ internal fun DashboardScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             Row(
-                modifier = Modifier.fillMaxWidth().statusBarsPadding()
-                    .padding(start = spacing.lg, end = spacing.md, top = spacing.sm, bottom = spacing.md),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(
+                        start = spacing.lg,
+                        end = spacing.md,
+                        top = spacing.sm,
+                        bottom = spacing.md
+                    ),
                 verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(spacing.xs),
             ) {
@@ -167,7 +178,7 @@ internal fun DashboardScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(horizontal = spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(spacing.md),
             contentPadding = PaddingValues(vertical = spacing.sm),
         ) {
             item {
@@ -184,10 +195,15 @@ internal fun DashboardScreen(
 
             if (showEnableNotifications) {
                 item {
-                    TextButton(onClick = onEnableNotifications) {
-                        Icon(Icons.Outlined.Notifications, contentDescription = null)
-                        Spacer(modifier = Modifier.width(spacing.xs))
-                        Text("Włącz powiadomienia")
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        TextButton(onClick = onEnableNotifications) {
+                            Icon(Icons.Outlined.Notifications, contentDescription = null)
+                            Spacer(modifier = Modifier.width(spacing.xs))
+                            Text("Włącz powiadomienia")
+                        }
                     }
                 }
             }
@@ -195,7 +211,6 @@ internal fun DashboardScreen(
             item {
                 TimetableSection(
                     selectedDay = state.selectedTimetableDay,
-                    selectedDate = state.selectedTimetableDate,
                     section = state.selectedTimetable,
                     daysOff = state.selectedDaysOff,
                     daysOffLoading = state.daysOffLoading,
@@ -250,7 +265,8 @@ private fun DashboardQuickNavigation(
     unreadMessagesBadge: String?,
 ) {
     LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.md),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(spacing.lg)
     ) {
         item {
             QuickNavigationItem(
@@ -269,20 +285,6 @@ private fun DashboardQuickNavigation(
         }
         item {
             QuickNavigationItem(
-                label = "Plan",
-                icon = Icons.Outlined.CalendarMonth,
-                onClick = onOpenTimetable,
-            )
-        }
-        item {
-            QuickNavigationItem(
-                label = "Frekwencja",
-                icon = Icons.Outlined.CheckCircle,
-                onClick = onOpenAttendance,
-            )
-        }
-        item {
-            QuickNavigationItem(
                 label = "Zadania",
                 icon = Icons.AutoMirrored.Outlined.Assignment,
                 onClick = onOpenSchoolTasks,
@@ -293,6 +295,20 @@ private fun DashboardQuickNavigation(
                 label = "Oceny",
                 icon = Icons.Outlined.Star,
                 onClick = onOpenGrades,
+            )
+        }
+        item {
+            QuickNavigationItem(
+                label = "Plan",
+                icon = Icons.Outlined.CalendarMonth,
+                onClick = onOpenTimetable,
+            )
+        }
+        item {
+            QuickNavigationItem(
+                label = "Frekwencja",
+                icon = Icons.Outlined.CheckCircle,
+                onClick = onOpenAttendance,
             )
         }
     }
@@ -315,6 +331,7 @@ private fun QuickNavigationItem(
     TextButton(
         onClick = onClick,
         enabled = enabled,
+        contentPadding = PaddingValues(horizontal = 0.dp)
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.xxs),
@@ -354,7 +371,6 @@ private fun QuickNavigationItem(
 @Composable
 private fun TimetableSection(
     selectedDay: DashboardTimetableDay,
-    selectedDate: java.time.LocalDate,
     section: DashboardSection<List<DashboardLesson>>,
     daysOff: List<SchoolDayOff>,
     daysOffLoading: Boolean,
@@ -383,13 +399,6 @@ private fun TimetableSection(
                 }
             },
         )
-//        if (selectedDay == DashboardTimetableDay.Tomorrow) {
-//            Text(
-//                text = selectedDate.dashboardHeaderLabel(),
-//                style = MaterialTheme.typography.bodyMedium,
-//                color = MaterialTheme.colorScheme.onSurfaceVariant,
-//            )
-//        }
         if (daysOff.isNotEmpty() || daysOffLoading || daysOffFailed) {
             DaysOffNotice(daysOff, daysOffLoading, daysOffFailed)
         }
@@ -406,14 +415,16 @@ private fun TimetableSection(
             }
         }
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 0.dp),
             horizontalArrangement = Arrangement.End
         ){
-        DashboardTextLink(
-            text = stringResource(R.string.dashboard_attendance_link),
-            onClick = onOpenAttendance,
-        )
-            }
+            DashboardTextLink(
+                text = stringResource(R.string.dashboard_attendance_link),
+                onClick = onOpenAttendance,
+            )
+        }
     }
 }
 
@@ -492,6 +503,7 @@ private fun DashboardTimetableDaySelectorItem(
 @Composable
 private fun DashboardLessonRow(lesson: DashboardLesson) {
     val spacing = EDziennikTheme.spacing
+    val block = lesson.block
     val contentColor = if (lesson.isCancelled) {
         MaterialTheme.colorScheme.onSurfaceVariant
     } else {
@@ -505,7 +517,7 @@ private fun DashboardLessonRow(lesson: DashboardLesson) {
     ) {
         Text(
             text = lesson.startTime,
-            modifier = Modifier.width(48.dp),
+            modifier = Modifier.width(42.dp),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -526,46 +538,71 @@ private fun DashboardLessonRow(lesson: DashboardLesson) {
                 Box(
                     modifier = Modifier
                         .width(1.dp)
-                        .height(28.dp)
+                        .heightIn(28.dp)
                         .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.54f)),
                 )
             }
         }
+
+        /*if (block?.additional != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = lesson.startTime,
+                    modifier = Modifier.width(42.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box(Modifier
+                    .width(1.dp)
+                    .heightIn(64.dp)
+                    .background(MaterialTheme.colorScheme.outline)
+                )
+                TimetableBlockContent(block, Modifier.weight(1f))
+            }
+            return
+        }*/
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.xxs)
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(spacing.xxs),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = lesson.subject,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = if (lesson.isCancelled) FontWeight.Normal else FontWeight.Medium,
-                    ),
-                    color = contentColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            if (block?.additional != null) {
+                TimetableBlockContent(block, Modifier.weight(1f))
+            } else {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(spacing.xxs),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = lesson.subject,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = if (lesson.isCancelled) FontWeight.Normal else FontWeight.Medium,
+                        ),
+                        color = contentColor,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
 //            Spacer(modifier = Modifier.height(spacing.xs))
-            if (lesson.isCancelled) {
-                Text(
-                    text = stringResource(R.string.dashboard_lesson_cancelled),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            if (lesson.isSubstitution) {
-                Text(
-                    text = stringResource(R.string.dashboard_lesson_substitution),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
+                if (lesson.isCancelled) {
+                    Text(
+                        text = stringResource(R.string.dashboard_lesson_cancelled),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (lesson.isSubstitution) {
+                    Text(
+                        text = stringResource(R.string.dashboard_lesson_substitution),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
 
-            lesson.attendanceStatus?.let { DashboardAttendanceStatus(it) }
+                lesson.attendanceStatus?.let { DashboardAttendanceStatus(it) }
+            }
         }
         Text(
             text = lesson.room.orEmpty(),
@@ -641,36 +678,55 @@ private fun GradesSection(
             section = section,
             emptyText = "Brak ocen",
         ) { grades ->
-            Column(verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.sm)) {
+            Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
                 grades.forEach { grade ->
+
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onOpenGrade(grade.target) },
-                        horizontalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.md),
+                        horizontalArrangement = Arrangement.spacedBy(spacing.md),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        DashboardGradeBadge(value = grade.value)
+                        DashboardGradeBadge(
+                            value = grade.value,
+                        )
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(40.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.24f),
+                                ),
+                        )
+
+                        Column(
+                            modifier = Modifier.weight(1f),
                         ) {
-                            if (grade.changedSinceLastLogin) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(spacing.xs)
-                                        .size(5.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.tertiary),
-                                )
-                            }
-                            Text(
-                                text = grade.subjectName,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            if (grade.changedSinceLastLogin || grade.subjectName.isNotEmpty())
+                                Row() {
+                                    if (grade.changedSinceLastLogin) {
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(spacing.xs)
+                                                .size(5.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.tertiary),
+                                        )
+                                    }
+
+                                    if (grade.subjectName.isNotEmpty())
+                                        Text(
+                                            text = grade.subjectName,
+                                            modifier = Modifier.weight(1f),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                }
                         }
                     }
                 }
@@ -681,24 +737,25 @@ private fun GradesSection(
 
 @Composable
 private fun DashboardGradeBadge(value: String) {
-    Surface(
-        modifier = Modifier.size(36.dp),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    Box(
+        modifier = Modifier
+            .width(40.dp)
+            .height(IntrinsicSize.Min)
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                softWrap = true,
-                maxLines = Int.MAX_VALUE,
-                lineHeight = 16.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            softWrap = true,
+            maxLines = Int.MAX_VALUE,
+            lineHeight = 16.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -894,10 +951,13 @@ private fun DashboardSectionLayout(
 internal fun DashboardTextLink(text: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
-            .clickable(role = Role.Button, onClick = onClick)
-            .minimumInteractiveComponentSize(),
+            .minimumInteractiveComponentSize()
+            .clickable(
+                role = Role.Button,
+                onClick = onClick,
+            ),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(spacing.xxs),
     ) {
         Text(
             text = text,
@@ -908,7 +968,7 @@ internal fun DashboardTextLink(text: String, onClick: () -> Unit) {
             imageVector = Icons.Outlined.ArrowOutward,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(11.dp),
+            modifier = Modifier.size(spacing.sm),
         )
     }
 }
@@ -929,15 +989,15 @@ private fun <T> SectionBody(
         section.errorMessage != null -> {
             Text(
                 text = section.errorMessage,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.error,
             )
         }
         section.data.isNullOrEmpty() -> {
             Text(
                 text = emptyText,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
         else -> content(section.data)

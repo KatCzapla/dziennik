@@ -54,8 +54,10 @@ class UonetHtmlFormParser {
     fun parseAutoPostForm(
         html: String,
         currentUrl: String,
+        strictAuthenticationRequest: Boolean = false,
     ): HtmlForm? {
         val document = Jsoup.parse(html, currentUrl)
+        val candidates = mutableListOf<HtmlForm>()
 
         document.select("form").forEach { form ->
             val hiddenFields = linkedMapOf<String, String>()
@@ -70,14 +72,28 @@ class UonetHtmlFormParser {
             }
 
             if ("wresult" in hiddenFields || hiddenFields["wa"] == "wsignin1.0") {
-                return HtmlForm(
+                if (form.attr("action").isNotBlank() && currentUrl.toHttpUrl().resolve(form.attr("action")) == null) return null
+                val method = form.attr("method").ifBlank { "GET" }.uppercase()
+                val supportedMethod = method == "POST" || (method == "GET" &&
+                    hiddenFields["wa"] == "wsignin1.0" && !hiddenFields["wtrealm"].isNullOrBlank() && "wresult" !in hiddenFields)
+                if (strictAuthenticationRequest && (
+                    !supportedMethod ||
+                        (form.hasAttr("enctype") && !form.attr("enctype").equals("application/x-www-form-urlencoded", true)) ||
+                        (hiddenFields["wresult"].isNullOrBlank() && hiddenFields["wa"] != "wsignin1.0") ||
+                        form.select("input").any { !it.attr("type").equals("hidden", ignoreCase = true) } ||
+                        form.select("input[name]").map { it.attr("name") }.distinct().size != form.select("input[name]").size
+                    )) return null
+                candidates += HtmlForm(
                     actionUrl = resolveActionUrl(currentUrl, form.attr("action")),
                     fields = hiddenFields,
+                    // Existing post-login callers accept method-less WS-Federation reply forms.
+                    method = if (strictAuthenticationRequest) method else "POST",
                 )
+                if (!strictAuthenticationRequest) return candidates.first()
             }
         }
 
-        return null
+        return candidates.singleOrNull()
     }
 
     fun resolveActionUrl(

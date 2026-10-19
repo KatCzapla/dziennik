@@ -7,6 +7,7 @@ import pl.usagi.edziennik.domain.time.parseApiLocalDate
 import pl.usagi.edziennik.domain.time.parseApiLocalTime
 import pl.usagi.edziennik.dto.TimetableChangeDto
 import pl.usagi.edziennik.dto.TimetableEntryDto
+import pl.usagi.edziennik.util.blankToNull
 
 fun TimetableEntryDto.toDomain(): TimetableEntry =
     TimetableEntry(
@@ -15,11 +16,13 @@ fun TimetableEntryDto.toDomain(): TimetableEntry =
         startTime = parseApiLocalTime(timeFrom),
         endTime = parseApiLocalTime(timeTo),
         subject = subject,
-        teacher = teacher.emptyToNull(),
-        supportingTeacher1 = supportingTeacher1.emptyToNull(),
-        supportingTeacher2 = supportingTeacher2.emptyToNull(),
-        room = room.emptyToNull(),
+        teacher = teacher.blankToNull(),
+        supportingTeacher1 = supportingTeacher1.blankToNull(),
+        supportingTeacher2 = supportingTeacher2.blankToNull(),
+        room = room.blankToNull(),
         changes = changes.map { it.toDomain() },
+        additional = additional,
+        annotation = annotation,
     )
 
 fun TimetableChangeDto.toDomain(): TimetableChange =
@@ -30,23 +33,20 @@ fun TimetableChangeDto.toDomain(): TimetableChange =
             teacherType = teacherType,
         ),
         teacherType = teacherType,
-        day = day.emptyToNull(),
+        day = day.blankToNull(),
         lessonNumber = lessonNumber,
         startTime = timeFrom?.let(::parseApiLocalTime),
         endTime = timeTo?.let(::parseApiLocalTime),
-        group = group.emptyToNull(),
-        subject = subject.emptyToNull(),
-        teacher = teacher.emptyToNull(),
-        room = room.emptyToNull(),
-        absenceInformation = absenceInformation.emptyToNull(),
+        group = group.blankToNull(),
+        subject = subject.blankToNull(),
+        teacher = teacher.blankToNull(),
+        room = room.blankToNull(),
+        absenceInformation = absenceInformation.blankToNull(),
     )
 
 fun List<TimetableEntryDto>.toDomainTimetable(): List<TimetableEntry> =
     map { it.toDomain() }
         .sortedWith(compareBy<TimetableEntry> { it.date }.thenBy { it.startTime })
-
-private fun String?.emptyToNull(): String? =
-    takeUnless { it.isNullOrBlank() }
 
 private fun toTimetableChangeKind(
     changeType: Int,

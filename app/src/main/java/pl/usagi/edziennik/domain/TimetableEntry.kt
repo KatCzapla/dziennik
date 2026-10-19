@@ -14,6 +14,8 @@ data class TimetableEntry(
     val supportingTeacher2: String? = null,
     val room: String?,
     val changes: List<TimetableChange>,
+    val additional: Boolean? = null,
+    val annotation: Int? = null,
 ) {
     val isCancelled: Boolean
         get() = changes.any { it.kind == TimetableChangeKind.Cancelled }

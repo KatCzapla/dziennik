@@ -14,6 +14,7 @@ import pl.usagi.edziennik.dto.AttendanceEntryDto
 import pl.usagi.edziennik.dto.AttendanceExcusesResponseDto
 import pl.usagi.edziennik.dto.AttendanceStatisticsDto
 import pl.usagi.edziennik.dto.AttendanceSubjectDto
+import pl.usagi.edziennik.util.emptyToNull
 
 fun AttendanceEntryDto.toDomainOrNull(): AttendanceEntry? {
     val date = date?.let(::runCatchingParseDate)?.getOrNull() ?: return null
@@ -95,6 +96,3 @@ private fun runCatchingParseDate(value: String) =
 
 private fun runCatchingParseTime(value: String) =
     runCatching { parseApiLocalTime(value) }
-
-private fun String?.emptyToNull(): String? =
-    takeUnless { it.isNullOrEmpty() }

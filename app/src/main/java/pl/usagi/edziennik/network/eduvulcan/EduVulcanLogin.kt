@@ -19,6 +19,7 @@ import org.jsoup.Jsoup
 import pl.usagi.edziennik.network.html.UonetHtmlFormParser
 import pl.usagi.edziennik.network.session.WsFederationNavigator
 import pl.usagi.edziennik.network.session.AuthenticationException
+import pl.usagi.edziennik.network.session.CurrentAuthenticationSession
 import pl.usagi.edziennik.network.session.authenticationDiagnostic
 
 sealed interface EduVulcanLoginResult {
@@ -33,6 +34,7 @@ class EduVulcanLogin(
     private val baseClient: OkHttpClient,
     private val json: Json = Json,
     private val persistentCookies: CookieJar? = null,
+    private val currentSession: CurrentAuthenticationSession? = null,
 ) {
     suspend fun checkCredentials(username: String, password: String): EduVulcanLoginResult =
         withContext(Dispatchers.IO) {
@@ -46,6 +48,13 @@ class EduVulcanLogin(
         }
 
     suspend fun authenticate(username: String, password: String): EduVulcanLoginResult =
+        if (currentSession == null) authenticateSession(username, password)
+        else currentSession.withAuthentication {
+            currentSession.beginLogin()
+            authenticateSession(username, password)
+        }
+
+    private suspend fun authenticateSession(username: String, password: String): EduVulcanLoginResult =
         withContext(Dispatchers.IO) {
             try {
                 val sessionClient = newSessionClient()
@@ -53,9 +62,13 @@ class EduVulcanLogin(
                     EduVulcanLoginResult.Accepted -> {
                         val authenticated = authenticateJournal(sessionClient)
                         if (authenticated is EduVulcanLoginResult.Authenticated && persistentCookies != null) {
-                            copyAuthenticatedCookies(
-                                (sessionClient.cookieJar as SessionCookies).snapshot(), persistentCookies,
-                            )
+                            val copyCookies = {
+                                copyAuthenticatedCookies(
+                                    (sessionClient.cookieJar as SessionCookies).snapshot(), persistentCookies,
+                                )
+                            }
+                            if (currentSession != null) currentSession.commitAuthenticationState(copyCookies)
+                            else copyCookies()
                             EduVulcanLoginResult.Authenticated(
                                 sessionClient.newBuilder().cookieJar(persistentCookies).build(),
                             )

@@ -5,7 +5,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import okhttp3.CookieJar
+import okhttp3.Cookie
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,6 +42,7 @@ import pl.usagi.edziennik.network.session.CurrentAuthenticationSession
 import pl.usagi.edziennik.network.session.LoggedInUser
 import pl.usagi.edziennik.network.session.LoggedInUserType
 import pl.usagi.edziennik.network.session.SessionManager
+import pl.usagi.edziennik.network.session.SessionCheck
 import pl.usagi.edziennik.repository.MessagesRepository
 import pl.usagi.edziennik.repository.ReceivedMessagesPage
 import pl.usagi.edziennik.repository.StudentRepository
@@ -80,7 +87,7 @@ class LoginViewModelTest {
     @Test fun bothProvidersCanLogInWithContextUnitIdMissingNullOrNumeric() = runTest {
         for (provider in AuthenticationProvider.entries) {
             for (field in listOf("", ",\"idJednostkaSkladowa\":null", ",\"idJednostkaSkladowa\":1220")) {
-                val current = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+                val current = sessionWithCookies()
                 val session = FakeSessionManager(isSessionValidResult = true)
                 val auth = AutoDetectLogin(
                     authenticateEduVulcan = { _, _ ->
@@ -107,7 +114,7 @@ class LoginViewModelTest {
 
     @Test fun savedSessionsRestoreWithContextUnitIdForBothProviders() = runTest {
         for (provider in AuthenticationProvider.entries) {
-            val current = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+            val current = sessionWithCookies()
             val vm = createViewModel(sessionManager = FakeSessionManager(validatePersistedSessionResult = true),
                 autoLoginSettings = FakeAutoLoginSettings(provider = provider), currentSession = current,
                 studentRepository = contextRepository(",\"idJednostkaSkladowa\":1220"))
@@ -153,7 +160,7 @@ class LoginViewModelTest {
             storedCredentials = StoredCredentials("user", "password"),
         )
         val autoLoginSettings = FakeAutoLoginSettings(enabled = false)
-        val currentSession = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+        val currentSession = sessionWithCookies()
         val user = LoggedInUser("Anna Kowalska", LoggedInUserType.PARENT)
 
         val viewModel = createViewModel(
@@ -201,7 +208,7 @@ class LoginViewModelTest {
     @Test
     fun rememberedEduVulcanReauthenticatesWithoutProjectFallback() = runTest {
         val settings = FakeAutoLoginSettings(enabled = true, provider = AuthenticationProvider.EDUVULCAN)
-        val session = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+        val session = sessionWithCookies()
         val client = OkHttpClient.Builder().cookieJar(CookieJar.NO_COOKIES).build()
         var eduCalls = 0
         val viewModel = createViewModel(
@@ -228,7 +235,7 @@ class LoginViewModelTest {
     @Test
     fun rememberedProjectReauthenticatesWithoutEduDetection() = runTest {
         val sessionManager = FakeSessionManager(isSessionValidResult = true)
-        val session = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+        val session = sessionWithCookies()
         val viewModel = createViewModel(
             sessionManager = sessionManager,
             credentialStore = FakeCredentialStore(StoredCredentials("user", "password")),
@@ -249,7 +256,7 @@ class LoginViewModelTest {
 
     @Test
     fun technicalErrorFromRememberedEduVulcanDoesNotTryProject() = runTest {
-        val session = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+        val session = sessionWithCookies()
         val viewModel = createViewModel(
             credentialStore = FakeCredentialStore(StoredCredentials("user", "password")),
             autoLoginSettings = FakeAutoLoginSettings(enabled = true, provider = AuthenticationProvider.EDUVULCAN),
@@ -479,7 +486,7 @@ class LoginViewModelTest {
     @Test
     fun manualEduVulcanSuccessActivatesReturnedSession() = runTest {
         val sessionClient = OkHttpClient.Builder().cookieJar(CookieJar.NO_COOKIES).build()
-        val currentSession = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+        val currentSession = sessionWithCookies()
         val settings = FakeAutoLoginSettings()
         var projectCalls = 0
         val viewModel = createViewModel(
@@ -510,7 +517,7 @@ class LoginViewModelTest {
 
     @Test
     fun manualLoginLoadsMailboxOwnerIntoCurrentSession() = runTest {
-        val currentSession = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+        val currentSession = sessionWithCookies()
         val user = LoggedInUser("Anna Kowalska", LoggedInUserType.PARENT)
         val viewModel = createViewModel(
             sessionManager = FakeSessionManager(isSessionValidResult = true),
@@ -551,7 +558,7 @@ class LoginViewModelTest {
 
     @Test
     fun manualProjectUonetSuccessAfterFallbackActivatesProjectSession() = runTest {
-        val currentSession = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+        val currentSession = sessionWithCookies()
         val settings = FakeAutoLoginSettings()
         var projectCalls = 0
         val viewModel = createViewModel(
@@ -609,7 +616,7 @@ class LoginViewModelTest {
             storedCredentials = StoredCredentials("user", "password"),
         )
         val autoLoginSettings = FakeAutoLoginSettings(enabled = true)
-        val currentSession = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+        val currentSession = sessionWithCookies()
         val viewModel = createViewModel(sessionManager, credentialStore, autoLoginSettings,
             currentSession = currentSession)
         advanceUntilIdle()
@@ -636,7 +643,7 @@ class LoginViewModelTest {
 
     @Test
     fun logoutInvalidatesLocalSnapshotAccountAndDeletesItsRows() = runTest {
-        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore())
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore()).apply { ensureAccountId() }
         val snapshots = FakeSnapshotStore()
         val scheduler = FakeSyncScheduler()
         val viewModel = createViewModel(
@@ -848,6 +855,393 @@ class LoginViewModelTest {
         assertFalse(viewModel.uiState.value.rememberCredentials)
     }
 
+    @Test fun expiredRestoreAndMissingLoginFormPreserveRememberedCredentialsAndSnapshotAccount() = runTest {
+        val stored = StoredCredentials("fixture-user", "fixture-password")
+        val credentials = FakeCredentialStore(stored)
+        val settings = FakeAutoLoginSettings(enabled = true, provider = AuthenticationProvider.PROJECT_UONET)
+        val session = FakeSessionManager(loginResult = Result.failure(AuthenticationException.LoginFormNotFound()))
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore())
+        val account = identity.ensureAccountId()
+        val snapshots = FakeSnapshotStore()
+        val vm = createViewModel(sessionManager = session, credentialStore = credentials,
+            autoLoginSettings = settings, localSnapshotIdentity = identity, snapshotStore = snapshots,
+            autoDetectLogin = AutoDetectLogin(
+                authenticateEduVulcan = { _, _ -> error("No provider autodetection or fallback") },
+                loginProjectUonet = session::login,
+            ))
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isSessionValid)
+        assertEquals(1, session.loginCalls)
+        assertTrue(session.clearSessionCalled)
+        assertFalse(credentials.clearCalled)
+        assertEquals(stored, credentials.load())
+        assertTrue(settings.enabled)
+        assertEquals(AuthenticationProvider.PROJECT_UONET, settings.provider)
+        assertEquals(account, identity.currentAccountId())
+        assertTrue(snapshots.deletedAccounts.isEmpty())
+    }
+
+    @Test fun failedRestoreWithoutAutoLoginDoesNotPerformLogoutOrRemoveCredentials() = runTest {
+        val session = FakeSessionManager(sessionChecks = mutableListOf(SessionCheck.INVALID_RESPONSE))
+        val credentials = FakeCredentialStore(StoredCredentials("fixture-user", "fixture-password"))
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore())
+        val account = identity.ensureAccountId()
+        val vm = createViewModel(sessionManager = session, credentialStore = credentials,
+            autoLoginSettings = FakeAutoLoginSettings(enabled = false), localSnapshotIdentity = identity)
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isSessionValid)
+        assertEquals(0, session.loginCalls)
+        assertFalse(session.clearSessionCalled)
+        assertFalse(credentials.clearCalled)
+        assertTrue(credentials.hasCredentials())
+        assertEquals(account, identity.currentAccountId())
+    }
+
+    @Test fun failedVerificationAfterAuthenticatedAutoLoginClearsCookiesButNotCredentialsOrSnapshotAccount() = runTest {
+        val session = FakeSessionManager(loginResult = Result.success(Unit), isSessionValidResult = false)
+        val credentials = FakeCredentialStore(StoredCredentials("fixture-user", "fixture-password"))
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore())
+        val account = identity.ensureAccountId()
+        val vm = createViewModel(sessionManager = session, credentialStore = credentials,
+            autoLoginSettings = FakeAutoLoginSettings(enabled = true), localSnapshotIdentity = identity,
+            autoDetectLogin = AutoDetectLogin(
+                authenticateEduVulcan = { _, _ -> error("No autodetection") },
+                loginProjectUonet = session::login,
+            ))
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isSessionValid)
+        assertTrue(session.clearSessionCalled)
+        assertFalse(credentials.clearCalled)
+        assertTrue(credentials.hasCredentials())
+        assertEquals(account, identity.currentAccountId())
+    }
+
+    @Test fun verificationErrorsPreserveActiveSessionAndCredentialsWithoutAutoLoginForBothProviders() = runTest {
+        for (provider in AuthenticationProvider.entries) {
+            for (error in listOf(SessionCheck.TRANSPORT_ERROR, SessionCheck.INVALID_RESPONSE, SessionCheck.SERVER_ERROR)) {
+                val session = FakeSessionManager(sessionChecks = mutableListOf(error))
+                val current = sessionWithCookies().apply { restore(provider) }
+                val generation = current.generation()
+                val credentials = FakeCredentialStore(StoredCredentials("fixture", "fixture"))
+                val settings = FakeAutoLoginSettings(enabled = true, provider = provider)
+                val identity = LocalSnapshotIdentity(FakeLocalIdentityStore())
+                val account = identity.ensureAccountId()
+                val vm = createViewModel(sessionManager = session, currentSession = current,
+                    credentialStore = credentials, autoLoginSettings = settings, localSnapshotIdentity = identity,
+                    autoDetectLogin = AutoDetectLogin(
+                        authenticateEduVulcan = { _, _ -> error("Must not authenticate") },
+                        loginProjectUonet = { _, _ -> error("Must not authenticate") },
+                    ))
+                advanceUntilIdle()
+                assertEquals(error, vm.uiState.value.sessionVerificationError)
+                assertEquals(LoginScreenMode.SessionVerificationError, vm.uiState.value.screenMode)
+                assertFalse(vm.uiState.value.isCheckingSession)
+                assertFalse(session.clearSessionCalled)
+                assertEquals(provider, current.provider)
+                assertEquals(generation, current.generation())
+                assertEquals(0, credentials.loadCalls)
+                assertFalse(credentials.clearCalled)
+                assertTrue(credentials.hasCredentials())
+                assertTrue(settings.enabled)
+                assertEquals(account, identity.currentAccountId())
+            }
+        }
+    }
+
+    @Test fun retryVerifiesExistingSessionAndReturnsHomeWithoutLoggingInOrDuplicateRequests() = runTest {
+        for (error in listOf(SessionCheck.TRANSPORT_ERROR, SessionCheck.INVALID_RESPONSE)) {
+            val session = FakeSessionManager(sessionChecks = mutableListOf(error, SessionCheck.VALID))
+            val current = sessionWithCookies()
+            val credentials = FakeCredentialStore(StoredCredentials("fixture", "fixture"))
+            val vm = createViewModel(sessionManager = session, currentSession = current,
+                credentialStore = credentials, autoLoginSettings = FakeAutoLoginSettings(enabled = true))
+            advanceUntilIdle()
+            val generation = current.generation()
+            vm.retrySessionVerification()
+            vm.retrySessionVerification()
+            assertEquals(LoginScreenMode.CheckingSession, vm.uiState.value.screenMode)
+            advanceUntilIdle()
+            assertEquals(2, session.checkCalls)
+            assertEquals(0, session.loginCalls)
+            assertFalse(session.clearSessionCalled)
+            assertEquals(generation, current.generation())
+            assertNull(vm.uiState.value.sessionVerificationError)
+            assertTrue(vm.uiState.value.isSessionValid)
+            assertEquals(LoginScreenMode.Home, vm.uiState.value.screenMode)
+            assertFalse(credentials.clearCalled)
+        }
+    }
+
+    @Test fun repeatedVerificationErrorRemainsRetryableInsteadOfShowingLogin() = runTest {
+        val session = FakeSessionManager(sessionChecks = mutableListOf(
+            SessionCheck.TRANSPORT_ERROR, SessionCheck.INVALID_RESPONSE))
+        val vm = createViewModel(sessionManager = session)
+        advanceUntilIdle()
+        vm.retrySessionVerification()
+        advanceUntilIdle()
+        assertEquals(LoginScreenMode.SessionVerificationError, vm.uiState.value.screenMode)
+        assertEquals(SessionCheck.INVALID_RESPONSE, vm.uiState.value.sessionVerificationError)
+        assertEquals(0, session.loginCalls)
+        assertFalse(session.clearSessionCalled)
+    }
+
+    @Test fun confirmedExpiredSessionStillClearsCookiesAndShowsLoginWithoutRemovingCredentials() = runTest {
+        val session = FakeSessionManager(sessionChecks = mutableListOf(SessionCheck.EXPIRED))
+        val current = sessionWithCookies()
+        val credentials = FakeCredentialStore(StoredCredentials("fixture", "fixture"))
+        val vm = createViewModel(sessionManager = session, currentSession = current,
+            credentialStore = credentials, autoLoginSettings = FakeAutoLoginSettings(enabled = false))
+        advanceUntilIdle()
+        assertTrue(session.clearSessionCalled)
+        assertNull(current.provider)
+        assertEquals(LoginScreenMode.Login, vm.uiState.value.screenMode)
+        assertNull(vm.uiState.value.sessionVerificationError)
+        assertFalse(credentials.clearCalled)
+        assertTrue(credentials.hasCredentials())
+    }
+
+    @Test fun transientVerificationAfterAutoLoginRetainsRenewedSessionAndRetryDoesNotLoginAgain() = runTest {
+        val session = FakeSessionManager(sessionChecks = mutableListOf(
+            SessionCheck.EXPIRED, SessionCheck.TRANSPORT_ERROR, SessionCheck.VALID))
+        val current = sessionWithCookies()
+        val credentials = FakeCredentialStore(StoredCredentials("fixture", "fixture"))
+        val vm = createViewModel(sessionManager = session, currentSession = current,
+            credentialStore = credentials, autoLoginSettings = FakeAutoLoginSettings(enabled = true))
+        advanceUntilIdle()
+        assertEquals(1, session.loginCalls)
+        assertEquals(AuthenticationProvider.PROJECT_UONET, current.provider)
+        assertEquals(SessionCheck.TRANSPORT_ERROR, vm.uiState.value.sessionVerificationError)
+        val generation = current.generation()
+        vm.retrySessionVerification()
+        advanceUntilIdle()
+        assertEquals(1, session.loginCalls)
+        assertEquals(generation, current.generation())
+        assertEquals(LoginScreenMode.Home, vm.uiState.value.screenMode)
+        assertFalse(credentials.clearCalled)
+    }
+
+    @Test fun logoutFromVerificationErrorRetainsExplicitLogoutBehavior() = runTest {
+        val session = FakeSessionManager(sessionChecks = mutableListOf(SessionCheck.TRANSPORT_ERROR))
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore()).apply { ensureAccountId() }
+        val current = sessionWithCookies()
+        val credentials = FakeCredentialStore(StoredCredentials("fixture", "fixture"))
+        val settings = FakeAutoLoginSettings(enabled = true)
+        val vm = createViewModel(sessionManager = session, currentSession = current,
+            credentialStore = credentials, autoLoginSettings = settings, localSnapshotIdentity = identity)
+        advanceUntilIdle()
+        vm.clearSession()
+        advanceUntilIdle()
+        assertTrue(session.clearSessionCalled)
+        assertNull(current.provider)
+        assertNull(identity.currentAccountId())
+        assertFalse(settings.enabled)
+        assertNull(vm.uiState.value.sessionVerificationError)
+        assertEquals(LoginScreenMode.Login, vm.uiState.value.screenMode)
+        assertFalse(credentials.clearCalled)
+    }
+
+    @Test fun logoutDuringNonCooperativeLoginCannotReactivateSessionOrSnapshotAccount() = runTest {
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val session = FakeSessionManager(isSessionValidResult = true, onLogin = {
+            started.complete(Unit)
+            withContext(NonCancellable) { finish.await() }
+        })
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore()).apply { ensureAccountId() }
+        val current = sessionWithCookies()
+        var widgetUpdates = 0
+        val vm = createViewModel(sessionManager = session, currentSession = current, localSnapshotIdentity = identity,
+            widgetUpdater = WidgetUpdater { widgetUpdates++ })
+        advanceUntilIdle()
+        vm.onLoginChanged("fixture")
+        vm.onPasswordChanged("fixture")
+        vm.login()
+        runCurrent()
+        started.await()
+        vm.clearSession()
+        assertNull(current.provider)
+        assertNull(identity.currentAccountId())
+        runCurrent()
+        assertEquals(1, widgetUpdates)
+        finish.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isSessionValid)
+        assertEquals(LoginScreenMode.Login, vm.uiState.value.screenMode)
+        assertNull(current.provider)
+        assertNull(identity.currentAccountId())
+    }
+
+    @Test fun firstLaunchWithoutLocalAccountNeverVerifiesEvenWithLeftoverCookiesAndCredentials() = runTest {
+        val session = FakeSessionManager(sessionChecks = mutableListOf(SessionCheck.INVALID_RESPONSE))
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore())
+        val current = sessionWithCookies()
+        val generation = current.generation()
+        val credentials = FakeCredentialStore(StoredCredentials("fixture", "fixture"))
+        val settings = FakeAutoLoginSettings(enabled = true)
+        val vm = createViewModel(sessionManager = session, localSnapshotIdentity = identity,
+            currentSession = current, credentialStore = credentials, autoLoginSettings = settings)
+        advanceUntilIdle()
+        assertEquals(LoginScreenMode.Login, vm.uiState.value.screenMode)
+        assertEquals(0, session.checkCalls)
+        assertEquals(0, session.loginCalls)
+        assertEquals(0, credentials.loadCalls)
+        assertFalse(session.clearSessionCalled)
+        assertNull(identity.currentAccountId())
+        assertEquals(generation, current.generation())
+        assertTrue(current.hasSessionCookies(AuthenticationProvider.PROJECT_UONET))
+        assertTrue(settings.enabled)
+    }
+
+    @Test fun cleanInstallAndProcessRecreationShowLoginWithoutCreatingAccountOrProbingServer() = runTest {
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore())
+        for (restart in 1..2) {
+            val session = FakeSessionManager(sessionChecks = mutableListOf(SessionCheck.INVALID_RESPONSE))
+            val current = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+            val vm = createViewModel(sessionManager = session, localSnapshotIdentity = identity,
+                currentSession = current, autoLoginSettings = FakeAutoLoginSettings(provider = null))
+            advanceUntilIdle()
+            assertEquals(LoginScreenMode.Login, vm.uiState.value.screenMode)
+            assertEquals(0, session.checkCalls)
+            assertEquals(0, session.loginCalls)
+            assertNull(identity.currentAccountId())
+            assertNull(current.provider)
+            assertFalse(session.clearSessionCalled)
+        }
+    }
+
+    @Test fun restoredBackupMetadataWithoutCookiesOrCredentialsCannotTriggerSessionCheck() = runTest {
+        val identity = LocalSnapshotIdentity(FakeLocalIdentityStore()).apply { ensureAccountId(); selectStudent(1) }
+        val account = identity.currentAccountId()
+        val selected = identity.selectedStudentScopeId()
+        val settings = FakeAutoLoginSettings(enabled = true, provider = AuthenticationProvider.PROJECT_UONET)
+        val credentials = FakeCredentialStore()
+        val session = FakeSessionManager(sessionChecks = mutableListOf(SessionCheck.INVALID_RESPONSE))
+        val snapshots = FakeSnapshotStore()
+        val current = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+        val vm = createViewModel(sessionManager = session, localSnapshotIdentity = identity,
+            currentSession = current, credentialStore = credentials, autoLoginSettings = settings, snapshotStore = snapshots)
+        advanceUntilIdle()
+        assertEquals(LoginScreenMode.Login, vm.uiState.value.screenMode)
+        assertEquals(0, session.checkCalls)
+        assertEquals(0, session.loginCalls)
+        assertFalse(session.clearSessionCalled)
+        assertFalse(credentials.clearCalled)
+        assertEquals(account, identity.currentAccountId())
+        assertEquals(selected, identity.selectedStudentScopeId())
+        assertTrue(snapshots.deletedAccounts.isEmpty())
+        assertTrue(settings.enabled)
+        assertEquals(AuthenticationProvider.PROJECT_UONET, settings.provider)
+        assertNull(current.provider)
+    }
+
+    @Test fun providerNameAloneDoesNotConstituteAuthenticationContext() = runTest {
+        val session = FakeSessionManager()
+        val current = CurrentAuthenticationSession(CookieJar.NO_COOKIES).apply { restore(AuthenticationProvider.PROJECT_UONET) }
+        val credentials = FakeCredentialStore(StoredCredentials("fixture", "fixture"))
+        val vm = createViewModel(sessionManager = session, currentSession = current, credentialStore = credentials,
+            autoLoginSettings = FakeAutoLoginSettings(enabled = false))
+        advanceUntilIdle()
+        assertEquals(LoginScreenMode.Login, vm.uiState.value.screenMode)
+        assertEquals(0, session.checkCalls)
+        assertEquals(0, credentials.loadCalls)
+        assertFalse(session.clearSessionCalled)
+    }
+
+    @Test fun completeSavedAutoLoginContextWithoutCookiesRenewsBeforeVerifyingForBothProviders() = runTest {
+        for (provider in AuthenticationProvider.entries) {
+            var logins = 0
+            val session = FakeSessionManager(sessionChecks = mutableListOf(SessionCheck.VALID))
+            val credentials = FakeCredentialStore(StoredCredentials("fixture", "fixture"))
+            val identity = LocalSnapshotIdentity(FakeLocalIdentityStore()).apply { ensureAccountId() }
+            val account = identity.currentAccountId()
+            val vm = createViewModel(sessionManager = session, credentialStore = credentials,
+                currentSession = CurrentAuthenticationSession(CookieJar.NO_COOKIES), localSnapshotIdentity = identity,
+                autoLoginSettings = FakeAutoLoginSettings(enabled = true, provider = provider),
+                autoDetectLogin = AutoDetectLogin(
+                    authenticateEduVulcan = { _, _ ->
+                        assertEquals(AuthenticationProvider.EDUVULCAN, provider)
+                        logins++
+                        EduVulcanLoginResult.Authenticated(OkHttpClient())
+                    },
+                    loginProjectUonet = { _, _ ->
+                        assertEquals(AuthenticationProvider.PROJECT_UONET, provider)
+                        logins++
+                        Result.success(Unit)
+                    },
+                ))
+            advanceUntilIdle()
+            assertEquals(1, logins)
+            assertEquals(1, session.checkCalls)
+            assertEquals(1, credentials.loadCalls)
+            assertFalse(session.clearSessionCalled)
+            assertEquals(LoginScreenMode.Home, vm.uiState.value.screenMode)
+            assertEquals(account, identity.currentAccountId())
+        }
+    }
+
+    @Test fun openingManualLoginFromVerificationErrorsPreservesAllLocalDataAndSessionGeneration() = runTest {
+        for (error in listOf(SessionCheck.TRANSPORT_ERROR, SessionCheck.SERVER_ERROR, SessionCheck.INVALID_RESPONSE)) {
+            val session = FakeSessionManager(sessionChecks = mutableListOf(error))
+            val current = sessionWithCookies()
+            val identity = LocalSnapshotIdentity(FakeLocalIdentityStore()).apply { ensureAccountId(); selectStudent(1) }
+            val account = requireNotNull(identity.currentAccountId())
+            val selected = identity.selectedStudentScopeId()
+            val credentials = FakeCredentialStore(StoredCredentials("fixture", "fixture"))
+            val settings = FakeAutoLoginSettings(enabled = true)
+            val snapshots = FakeSnapshotStore().apply {
+                payloads["${account.value}:fixture"] = "snapshot"
+                pendingEvents[account] = listOf("pending")
+            }
+            val vm = createViewModel(sessionManager = session, currentSession = current, localSnapshotIdentity = identity,
+                credentialStore = credentials, autoLoginSettings = settings, snapshotStore = snapshots)
+            advanceUntilIdle()
+            val generation = current.generation()
+            assertEquals(LoginScreenMode.SessionVerificationError, vm.uiState.value.screenMode)
+            vm.openManualLogin()
+            advanceUntilIdle()
+            assertEquals(LoginScreenMode.Login, vm.uiState.value.screenMode)
+            assertNull(vm.uiState.value.sessionVerificationError)
+            assertEquals(1, session.checkCalls)
+            assertEquals(0, session.loginCalls)
+            assertFalse(session.clearSessionCalled)
+            assertEquals(generation, current.generation())
+            assertTrue(current.hasSessionCookies(AuthenticationProvider.PROJECT_UONET))
+            assertEquals(account, identity.currentAccountId())
+            assertEquals(selected, identity.selectedStudentScopeId())
+            assertEquals(mapOf("${account.value}:fixture" to "snapshot"), snapshots.payloads)
+            assertEquals(listOf("pending"), snapshots.pendingEvents[account])
+            assertTrue(snapshots.deletedAccounts.isEmpty())
+            assertFalse(credentials.clearCalled)
+            assertEquals(StoredCredentials("fixture", "fixture"), credentials.load())
+            assertTrue(settings.enabled)
+            assertEquals(AuthenticationProvider.PROJECT_UONET, settings.provider)
+        }
+    }
+
+    @Test fun manualLoginCanCompleteAfterInvalidContextResponse() = runTest {
+        val session = FakeSessionManager(sessionChecks = mutableListOf(SessionCheck.INVALID_RESPONSE), isSessionValidResult = true)
+        val vm = createViewModel(sessionManager = session)
+        advanceUntilIdle()
+        assertEquals(LoginScreenMode.SessionVerificationError, vm.uiState.value.screenMode)
+        vm.openManualLogin()
+        vm.onLoginChanged("fixture")
+        vm.onPasswordChanged("fixture")
+        vm.login()
+        advanceUntilIdle()
+        assertEquals(1, session.loginCalls)
+        assertEquals(LoginScreenMode.Home, vm.uiState.value.screenMode)
+        assertNull(vm.uiState.value.sessionVerificationError)
+    }
+
+    // Existing restore tests model a previously authenticated installation.
+    private fun sessionWithCookies(): CurrentAuthenticationSession = CurrentAuthenticationSession(object : CookieJar {
+        private val cookies = listOf("projekt-uczen.edu.lublin.eu", "uczen.edu.lublin.eu").map { host ->
+            Cookie.Builder().name("fixture-session").value("fixture").hostOnlyDomain(host).build()
+        }
+        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) = Unit
+        override fun loadForRequest(url: HttpUrl) = cookies.filter { it.matches(url) }
+    })
+
     private fun createViewModel(
         sessionManager: FakeSessionManager = FakeSessionManager(),
         credentialStore: FakeCredentialStore = FakeCredentialStore(),
@@ -857,9 +1251,9 @@ class LoginViewModelTest {
             authenticateEduVulcan = { _, _ -> EduVulcanLoginResult.InvalidCredentials },
             loginProjectUonet = sessionManager::login,
         ),
-        currentSession: CurrentAuthenticationSession = CurrentAuthenticationSession(CookieJar.NO_COOKIES),
+        currentSession: CurrentAuthenticationSession = sessionWithCookies(),
         messagesRepository: MessagesRepository = FakeMessagesRepository(),
-        localSnapshotIdentity: LocalSnapshotIdentity = LocalSnapshotIdentity(FakeLocalIdentityStore()),
+        localSnapshotIdentity: LocalSnapshotIdentity = LocalSnapshotIdentity(FakeLocalIdentityStore()).apply { ensureAccountId() },
         snapshotStore: SnapshotStore = FakeSnapshotStore(),
         syncScheduler: SyncScheduler = FakeSyncScheduler(),
         widgetUpdater: WidgetUpdater = WidgetUpdater {},
@@ -895,6 +1289,7 @@ class LoginViewModelTest {
     private class FakeSnapshotStore : SnapshotStore {
         val deletedAccounts = mutableListOf<LocalAccountId>()
         val payloads = mutableMapOf<String, String>()
+        val pendingEvents = mutableMapOf<LocalAccountId, List<String>>()
         var failDelete = false
         var reads = 0
         var onDelete: (() -> Unit)? = null
@@ -914,7 +1309,32 @@ class LoginViewModelTest {
             onDelete?.invoke()
             if (failDelete) error("Delete failed")
             payloads.keys.removeAll { it.startsWith(accountId.value) }
+            pendingEvents.remove(accountId)
         }
+    }
+
+    @Test fun rejectedManualProjectCandidateDoesNotReplaceSessionOrStoredCredentials() = runTest {
+        val current = sessionWithCookies()
+        val credentials = FakeCredentialStore(StoredCredentials("previous", "previous"))
+        val session = FakeSessionManager(
+            validatePersistedSessionResult = true,
+            isSessionValidResult = false,
+            onLogin = { current.prepareProjectLoginCandidate() },
+        )
+        val vm = createViewModel(sessionManager = session, currentSession = current, credentialStore = credentials)
+        advanceUntilIdle()
+        assertEquals(AuthenticationProvider.PROJECT_UONET, current.provider)
+        vm.onLoginChanged("new")
+        vm.onPasswordChanged("new")
+        vm.onRememberCredentialsChanged(true)
+        vm.login()
+        advanceUntilIdle()
+        assertEquals(AuthenticationProvider.PROJECT_UONET, current.provider)
+        assertFalse(vm.uiState.value.isSessionValid)
+        assertFalse(credentials.clearCalled)
+        assertNull(credentials.savedCredentials)
+        assertEquals(StoredCredentials("previous", "previous"), credentials.load())
+        assertFalse(session.clearSessionCalled)
     }
 
     private class FakeMessagesRepository(
@@ -944,19 +1364,30 @@ class LoginViewModelTest {
         private val validatePersistedSessionResult: Boolean = false,
         private val loginResult: Result<Unit> = Result.success(Unit),
         private val isSessionValidResult: Boolean = false,
+        private val sessionChecks: MutableList<SessionCheck> = mutableListOf(),
+        private val onLogin: suspend () -> Unit = {},
     ) : SessionManager {
         var loginCalls = 0
         var clearSessionCalled = false
+        var checkCalls = 0
 
         override suspend fun login(
             username: String,
             password: String,
         ): Result<Unit> {
             loginCalls += 1
+            onLogin()
             return loginResult
         }
 
         override suspend fun isSessionValid(): Boolean = isSessionValidResult
+
+        override suspend fun checkSession(): SessionCheck {
+            checkCalls++
+            if (sessionChecks.isNotEmpty()) return sessionChecks.removeAt(0)
+            val valid = if (checkCalls == 1) validatePersistedSessionResult else isSessionValidResult
+            return if (valid) SessionCheck.VALID else SessionCheck.EXPIRED
+        }
 
         override suspend fun validatePersistedSession(): Boolean = validatePersistedSessionResult
 

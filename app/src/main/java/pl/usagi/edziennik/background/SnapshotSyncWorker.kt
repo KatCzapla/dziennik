@@ -28,11 +28,14 @@ class PeriodicSyncRun @Inject constructor(
         publishOutboxSafely(counters)
         try {
             val preparation = session.prepareResult()
+            syncStageDiagnostic("SESSION_PREPARATION", preparation.name)
             if (preparation != SessionPreparation.READY) {
                 return@withLock SyncRunResult(SyncRunStatus.FAILED, preparation.retryable, preparation.name)
             }
             counters.detectedEvents = null
+            syncStageDiagnostic("FETCH_DATA", "START")
             val result = sync.syncOnce()
+            syncStageDiagnostic("FETCH_DATA", "FINISHED")
             counters.detectedEvents = result.events.size
             if (!session.isCurrent()) SyncRunResult(SyncRunStatus.FAILED, reason = "ACCOUNT_CHANGED")
             else result.runResult()
@@ -65,6 +68,7 @@ class SnapshotSyncWorker @AssistedInject constructor(
     private val diagnostics: SyncDiagnostics,
 ) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result = try {
+        syncStageDiagnostic("WORKER", if (inputData.getBoolean(MANUAL_REFRESH, false)) "START_MANUAL" else "START_PERIODIC")
         val result = diagnostics.recordRun(inputData.getBoolean(MANUAL_REFRESH, false)) { counters ->
             if (inputData.getBoolean(MANUAL_REFRESH, false)) manualSyncRun.run(counters) else syncRun.run(counters)
         }

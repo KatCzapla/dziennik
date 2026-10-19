@@ -29,6 +29,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.AddBox
+import androidx.compose.material.icons.outlined.Cancel
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -54,6 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import kotlinx.coroutines.launch
+import pl.usagi.edziennik.domain.AttendanceStatus
 import pl.usagi.edziennik.domain.TimetableChange
 import pl.usagi.edziennik.domain.TimetableEntry
 import pl.usagi.edziennik.domain.time.firstSelectableSchoolDate
@@ -443,8 +449,8 @@ private fun DayPlanPage(
                 )
             }
         } else if (entries.isNotEmpty()) {
-            items(entries) { entry ->
-                TimetableRow(entry = entry)
+            items(entries.toTimetableBlocks()) { block ->
+                TimetableRow(block = block)
             }
             item {
                 Spacer(modifier = Modifier.height(spacing.md))
@@ -454,8 +460,9 @@ private fun DayPlanPage(
 }
 
 @Composable
-private fun TimetableRow(entry: TimetableEntry) {
+private fun TimetableRow(block: TimetableBlock) {
     val spacing = EDziennikTheme.spacing
+    val entry = block.primary
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -467,11 +474,17 @@ private fun TimetableRow(entry: TimetableEntry) {
             lessonNumber = entry.displayLessonNumber(),
         )
         Timeline()
-        LessonColumn(
-            entry = entry,
+        TimetableBlockContent(
+            block = block,
             modifier = Modifier.weight(1f),
         )
     }
+}
+
+@Composable
+internal fun TimetableBlockContent(block: TimetableBlock, modifier: Modifier = Modifier) {
+    LessonColumn(entry = block.primary, preserveDetails = block.additional != null)
+    block.additional?.let { LessonColumn(entry = it, preserveDetails = true) }
 }
 
 @Composable
@@ -518,6 +531,7 @@ private fun Timeline() {
 private fun LessonColumn(
     entry: TimetableEntry,
     modifier: Modifier = Modifier,
+    preserveDetails: Boolean = false,
 ) {
     val spacing = EDziennikTheme.spacing
     val effectiveSubject = entry.changes.firstNotNullOfOrNull { it.subject } ?: entry.subject
@@ -534,10 +548,29 @@ private fun LessonColumn(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(spacing.xs),
     ) {
+        if (entry.additional == true) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.xxs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.AddBox,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = stringResource(R.string.timetable_additional_lesson),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
         Text(
             text = effectiveSubject,
-            style = MaterialTheme.typography.titleMedium,
-            color = primaryContentColor,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                fontWeight = if (entry.isCancelled) FontWeight.Normal else FontWeight.Medium,
+            ),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
@@ -570,7 +603,7 @@ private fun LessonColumn(
                 }
             }
         }
-        if (!entry.isCancelled) effectiveTeacher?.let { teacher ->
+        if (!entry.isCancelled || preserveDetails) effectiveTeacher?.let { teacher ->
             Text(
                 text = teacher,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
@@ -579,7 +612,7 @@ private fun LessonColumn(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (!entry.isCancelled) effectiveRoom?.let { room ->
+        if (!entry.isCancelled || preserveDetails) effectiveRoom?.let { room ->
             Text(
                 text = "sala $room",
                 style = MaterialTheme.typography.bodyMedium,
@@ -589,6 +622,25 @@ private fun LessonColumn(
             )
         }
         LessonChangeNotes(entry = entry, substitution = substitution)
+        if (preserveDetails) {
+            substitution?.readableNote()?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+            if (entry.teacher != effectiveTeacher) entry.teacher?.let {
+                Text(stringResource(R.string.timetable_original_teacher, it), style = MaterialTheme.typography.bodySmall)
+            }
+            if (entry.room != effectiveRoom) entry.room?.let {
+                Text(stringResource(R.string.timetable_original_room, it), style = MaterialTheme.typography.bodySmall)
+            }
+            listOfNotNull(entry.supportingTeacher1, entry.supportingTeacher2).forEach { teacher ->
+                Text(teacher, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (entry.isCancelled) {
+                entry.changes.mapNotNull { it.readableNote() }.forEach {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
     }
 }
 

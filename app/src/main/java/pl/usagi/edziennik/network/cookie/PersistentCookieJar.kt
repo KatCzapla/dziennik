@@ -53,6 +53,16 @@ class PersistentCookieJar(
     }
 
     @Synchronized
+    fun replaceCookies(replacement: List<Cookie>) {
+        val now = System.currentTimeMillis()
+        val serialized = replacement.filter { it.expiresAt > now }.map { it.toSerializableCookie() }
+        val encoded = json.encodeToString(ListSerializer(SerializableCookie.serializer()), serialized)
+        preferences.edit().putString(COOKIES_KEY, encoded).apply()
+        cookies.clear()
+        cookies += serialized
+    }
+
+    @Synchronized
     fun clear() {
         cookies.clear()
         preferences.edit().remove(COOKIES_KEY).apply()

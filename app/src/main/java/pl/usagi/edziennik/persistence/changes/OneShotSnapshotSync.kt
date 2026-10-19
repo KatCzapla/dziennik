@@ -1,6 +1,7 @@
 package pl.usagi.edziennik.persistence.changes
 
 import kotlinx.coroutines.CancellationException
+import pl.usagi.edziennik.background.syncStageDiagnostic
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.domain.changes.ChangeEvent
@@ -66,17 +67,21 @@ class OneShotSnapshotSync @Inject constructor(
         val successful = mutableSetOf<SnapshotArea>()
 
         suspend fun area(area: SnapshotArea, block: suspend () -> AreaResult) {
+            syncStageDiagnostic("FETCH_${area.name}", "START")
             try {
                 val result = block()
                 successful += area
                 events += result.events
                 result.issue?.let { if (issues[area] != SyncIssue.FAILED) issues[area] = it }
                 result.cause?.let { if (causes[area]?.retryable != true) causes[area] = it }
+                syncStageDiagnostic("FETCH_${area.name}", "${result.issue?.name ?: "COMPLETE"} cause=${result.cause?.name ?: "NONE"}")
             } catch (cancelled: CancellationException) {
+                syncStageDiagnostic("FETCH_${area.name}", "CANCELLED")
                 throw cancelled
             } catch (failure: Exception) {
                 issues[area] = SyncIssue.FAILED
                 val cause = failure.syncFailureCause()
+                syncStageDiagnostic("FETCH_${area.name}", "FAILED cause=${cause.name}")
                 if (causes[area]?.retryable != true) causes[area] = cause
             }
         }

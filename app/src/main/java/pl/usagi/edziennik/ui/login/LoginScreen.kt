@@ -57,6 +57,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.network.messages.MessagesDiagnostics
 import pl.usagi.edziennik.ui.components.EmptyState
+import pl.usagi.edziennik.ui.components.ErrorState
+import pl.usagi.edziennik.network.session.SessionCheck
 import pl.usagi.edziennik.ui.components.QuietLoadingState
 import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.dashboard.DashboardRoute
@@ -110,6 +112,8 @@ fun LoginRoute(
         onPasswordChanged = viewModel::onPasswordChanged,
         onRememberCredentialsChanged = viewModel::onRememberCredentialsChanged,
         onSubmit = viewModel::login,
+        onRetrySessionVerification = viewModel::retrySessionVerification,
+        onOpenManualLogin = viewModel::openManualLogin,
         onClearSession = viewModel::clearSession,
         onStudentSelected = viewModel::selectStudent,
         onOpenTimetable = onOpenTimetable,
@@ -133,6 +137,8 @@ private fun LoginScreen(
     onPasswordChanged: (String) -> Unit,
     onRememberCredentialsChanged: (Boolean) -> Unit,
     onSubmit: () -> Unit,
+    onRetrySessionVerification: () -> Unit,
+    onOpenManualLogin: () -> Unit,
     onClearSession: () -> Unit,
     onStudentSelected: (Student) -> Unit,
     onOpenTimetable: () -> Unit,
@@ -170,6 +176,21 @@ private fun LoginScreen(
             ) { mode ->
                 when (mode) {
                     LoginScreenMode.CheckingSession -> CheckingSessionContent()
+                    LoginScreenMode.SessionVerificationError -> ScreenColumn(verticalArrangement = Arrangement.Center) {
+                        ErrorState(
+                            title = stringResource(R.string.session_verification_error_title),
+                            message = stringResource(when (state.sessionVerificationError) {
+                                SessionCheck.TRANSPORT_ERROR -> R.string.session_verification_connection_error
+                                SessionCheck.SERVER_ERROR -> R.string.session_verification_server_error
+                                else -> R.string.session_verification_invalid_response
+                            }),
+                            actionLabel = stringResource(R.string.session_verification_retry),
+                            onAction = onRetrySessionVerification,
+                        )
+                        TextButton(onClick = onOpenManualLogin) {
+                            Text(stringResource(R.string.session_verification_manual_login))
+                        }
+                    }
                     LoginScreenMode.LoadingStudents -> LoadingStudentsContent()
                     LoginScreenMode.Home -> DashboardRoute(
                         loggedInUser = state.loggedInUser,
@@ -500,17 +521,19 @@ private fun loginTextFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f),
 )
 
-private enum class LoginScreenMode {
+internal enum class LoginScreenMode {
     CheckingSession,
+    SessionVerificationError,
     LoadingStudents,
     Home,
     PickStudent,
     Login,
 }
 
-private val LoginUiState.screenMode: LoginScreenMode
+internal val LoginUiState.screenMode: LoginScreenMode
     get() = when {
         isCheckingSession -> LoginScreenMode.CheckingSession
+        sessionVerificationError != null -> LoginScreenMode.SessionVerificationError
         isSessionValid && isLoadingStudents -> LoginScreenMode.LoadingStudents
         isSessionValid && activeStudent != null -> LoginScreenMode.Home
         isSessionValid && students.size > 1 -> LoginScreenMode.PickStudent

@@ -1,7 +1,13 @@
 package pl.usagi.edziennik.background
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import okhttp3.CookieJar
+import okhttp3.Cookie
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -26,7 +32,15 @@ import pl.usagi.edziennik.persistence.changes.OneShotSyncResult
 import pl.usagi.edziennik.persistence.changes.SnapshotSynchronizer
 import pl.usagi.edziennik.repository.StudentRepository
 import pl.usagi.edziennik.domain.changes.ChangeEvent
+import pl.usagi.edziennik.network.NetworkModule
+import android.app.Application
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33], application = Application::class)
 class BackgroundSessionPreparerTest {
     @Test fun validSessionDoesNotLogInAgain() = runTest {
         val fixture = Fixture(initiallyValid = true)
@@ -213,6 +227,119 @@ class BackgroundSessionPreparerTest {
         assertFalse(result.retryable)
         assertEquals(0, fixture.sessionClears)
         assertEquals(0, fixture.projectLoginCalls + fixture.eduLoginCalls)
+        assertEquals(0, fixture.sync.calls)
+    }
+
+    @Test fun initialInvalidResponseBlocksBothProvidersEvenWithCredentialsAndEnabledAutoLogin() = runTest {
+        AuthenticationProvider.entries.forEach { provider ->
+            val fixture = Fixture(provider = provider, checkResults = mutableListOf(SessionCheck.INVALID_RESPONSE))
+            val baseline = fixture.sync.baseline
+            val result = fixture.runSync()
+            assertEquals("SESSION_INVALID_RESPONSE", result.reason)
+            assertEquals(SyncRunStatus.FAILED, result.status)
+            assertFalse(result.retryable)
+            assertEquals(0, fixture.credentialLoads)
+            assertEquals(0, fixture.sessionClears)
+            assertEquals(0, fixture.eduLoginCalls + fixture.projectLoginCalls)
+            assertEquals(0, fixture.sync.calls)
+            assertEquals(baseline, fixture.sync.baseline)
+        }
+    }
+
+    @Test fun invalidResponseAfterSuccessfulAutoLoginAlsoPreventsSyncForBothProviders() = runTest {
+        AuthenticationProvider.entries.forEach { provider ->
+            val fixture = Fixture(provider = provider,
+                checkResults = mutableListOf(SessionCheck.EXPIRED, SessionCheck.INVALID_RESPONSE))
+            val baseline = fixture.sync.baseline
+            assertEquals("SESSION_INVALID_RESPONSE", fixture.runSync().reason)
+            assertEquals(1, fixture.eduLoginCalls + fixture.projectLoginCalls)
+            assertEquals(1, fixture.sessionClears)
+            assertEquals(provider, fixture.currentSession.provider)
+            assertEquals(0, fixture.sync.calls)
+            assertEquals(baseline, fixture.sync.baseline)
+        }
+    }
+
+    @Test fun diagnosticsDistinguishExistingAndRenewedSessionFailureWithoutSecrets() = runTest {
+        val cases = listOf(
+            mutableListOf(SessionCheck.INVALID_RESPONSE) to "VERIFY_EXISTING_SESSION",
+            mutableListOf(SessionCheck.EXPIRED, SessionCheck.INVALID_RESPONSE) to "VERIFY_RENEWED_SESSION",
+        )
+        for ((checks, stage) in cases) {
+            ShadowLog.clear()
+            Fixture(checkResults = checks).runSync()
+            val logs = ShadowLog.getLogsForTag("SnapshotSync").map { it.msg }
+            assertTrue(logs.any { it.startsWith("stage=RESTORE_SESSION") })
+            assertTrue(logs.contains("stage=$stage result=SESSION_INVALID_RESPONSE"))
+            assertEquals(stage == "VERIFY_RENEWED_SESSION", logs.contains("stage=AUTO_LOGIN result=SUCCESS"))
+            assertFalse(logs.contains("stage=FETCH_DATA result=START"))
+            assertFalse(logs.joinToString().contains("saved-user"))
+            assertFalse(logs.joinToString().contains("saved-password"))
+            assertFalse(logs.joinToString().contains("runtime-key"))
+        }
+    }
+
+    @Test fun readySessionDiagnosticsReachDataFetchingWithoutAutoLogin() = runTest {
+        ShadowLog.clear()
+        Fixture(initiallyValid = true).runSync()
+        val logs = ShadowLog.getLogsForTag("SnapshotSync").map { it.msg }
+        assertTrue(logs.contains("stage=SESSION_PREPARATION result=READY"))
+        assertTrue(logs.contains("stage=FETCH_DATA result=START"))
+        assertTrue(logs.contains("stage=FETCH_DATA result=FINISHED"))
+        assertFalse(logs.any { it.startsWith("stage=AUTO_LOGIN") })
+    }
+
+    @Test fun backgroundRestoreAndRenewalUseCookieStateVisibleToAnAlreadyCreatedUiClient() = runTest {
+        val url = "https://projekt-uczen.edu.lublin.eu/lublin/api/Context".toHttpUrl()
+        val original = Cookie.Builder().name("fixture-session").value("before")
+            .hostOnlyDomain(url.host).build()
+        val renewed = Cookie.Builder().name("fixture-session").value("after")
+            .hostOnlyDomain(url.host).build()
+        for (initiallyValid in listOf(true, false)) {
+            val jar = object : CookieJar {
+                var stored = listOf(original)
+                override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) { stored = cookies }
+                override fun loadForRequest(url: HttpUrl) = stored.filter { it.matches(url) }
+            }
+            val fixture = Fixture(initiallyValid = initiallyValid, cookieJar = jar,
+                onProjectLogin = { jar.saveFromResponse(url, listOf(renewed)) })
+            val uiClient = NetworkModule.provideOkHttpClient(fixture.currentSession)
+            assertEquals(listOf(original), uiClient.cookieJar.loadForRequest(url))
+
+            assertEquals(SyncRunStatus.COMPLETE, fixture.runSync().status)
+
+            assertTrue(uiClient.cookieJar === fixture.currentSession)
+            assertEquals(AuthenticationProvider.PROJECT_UONET, fixture.currentSession.provider)
+            assertEquals(listOf(if (initiallyValid) original else renewed), uiClient.cookieJar.loadForRequest(url))
+            assertEquals(if (initiallyValid) 0 else 1, fixture.projectLoginCalls)
+            assertEquals(1, fixture.sync.calls)
+        }
+    }
+
+    @Test fun uiLoginWaitsForWorkerAutoLoginUsingTheSameSession() = runTest {
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val fixture = Fixture(onProjectLogin = { started.complete(Unit); finish.await() })
+        var uiStarted = false
+        val worker = launch { fixture.runSync() }
+        started.await()
+        val ui = launch {
+            fixture.currentSession.withAuthentication {
+                uiStarted = true
+                fixture.currentSession.beginLogin()
+                fixture.currentSession.activate(pl.usagi.edziennik.network.session.AutoDetectLoginResult.Success(
+                    AuthenticationProvider.PROJECT_UONET))
+            }
+        }
+        yield()
+        assertFalse(uiStarted)
+        finish.complete(Unit)
+        worker.join()
+        ui.join()
+        assertTrue(uiStarted)
+        assertEquals(1, fixture.projectLoginCalls)
+        assertEquals(1, fixture.sync.calls)
+        assertEquals(AuthenticationProvider.PROJECT_UONET, fixture.currentSession.provider)
     }
 
     private class Fixture(
@@ -226,6 +353,8 @@ class BackgroundSessionPreparerTest {
         private val checkException: Exception? = null,
         private val transientLoginFailure: Boolean = false,
         private val invalidCredentials: Boolean = false,
+        cookieJar: CookieJar = CookieJar.NO_COOKIES,
+        private val onProjectLogin: suspend () -> Unit = {},
     ) {
         private val identityStore = object : LocalIdentityStore {
             private val values = mutableMapOf<String, String>()
@@ -234,7 +363,7 @@ class BackgroundSessionPreparerTest {
             override fun clear() { values.clear() }
         }
         val identity = LocalSnapshotIdentity(identityStore).also { it.ensureAccountId() }
-        val currentSession = CurrentAuthenticationSession(CookieJar.NO_COOKIES)
+        val currentSession = CurrentAuthenticationSession(cookieJar)
         val activeStudentManager = ActiveStudentManager()
         var credentialLoads = 0
         private val credentials = object : CredentialStore {
@@ -286,6 +415,7 @@ class BackgroundSessionPreparerTest {
                 if (transientLoginFailure) Result.failure(AuthenticationException.Network(java.io.IOException()))
                 else if (invalidCredentials) Result.failure(AuthenticationException.InvalidCredentials())
                 else if (loginSucceeds) {
+                    onProjectLogin()
                     valid = sessionValidAfterLogin
                     Result.success(Unit)
                 } else Result.failure(IllegalStateException("Authentication failed"))

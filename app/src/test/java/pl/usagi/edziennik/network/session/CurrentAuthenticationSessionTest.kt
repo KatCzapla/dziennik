@@ -130,6 +130,35 @@ class CurrentAuthenticationSessionTest {
         assertEquals(AuthenticationProvider.EDUVULCAN, session.provider)
     }
 
+    @Test fun providerMetadataAndUnrelatedCookiesAreNotSessionMaterial() {
+        val jar = RecordingCookieJar()
+        val session = CurrentAuthenticationSession(jar)
+        session.restore(AuthenticationProvider.PROJECT_UONET)
+        assertEquals(false, session.hasSessionCookies(AuthenticationProvider.PROJECT_UONET))
+        val unrelated = "https://unrelated.test/".toHttpUrl()
+        jar.saveFromResponse(unrelated, listOf(Cookie.Builder().name("fixture").value("fixture")
+            .hostOnlyDomain(unrelated.host).build()))
+        assertEquals(false, session.hasSessionCookies(AuthenticationProvider.PROJECT_UONET))
+    }
+
+    @Test fun sessionMaterialMustMatchProviderPathAndExpiry() {
+        val jar = RecordingCookieJar()
+        val session = CurrentAuthenticationSession(jar)
+        val project = "https://projekt-uczen.edu.lublin.eu/lublin/api/Context".toHttpUrl()
+        val edu = "https://uczen.edu.lublin.eu/lublin/api/Context".toHttpUrl()
+        jar.saveFromResponse(project, listOf(Cookie.Builder().name("fixture").value("fixture")
+            .hostOnlyDomain(project.host).build()))
+        jar.saveFromResponse(edu, listOf(
+            Cookie.Builder().name("expired").value("fixture").hostOnlyDomain(edu.host).expiresAt(1).build(),
+            Cookie.Builder().name("other-path").value("fixture").hostOnlyDomain(edu.host).path("/other").build(),
+        ))
+        assertEquals(true, session.hasSessionCookies(AuthenticationProvider.PROJECT_UONET))
+        assertEquals(false, session.hasSessionCookies(AuthenticationProvider.EDUVULCAN))
+        jar.saveFromResponse(edu, listOf(Cookie.Builder().name("fixture").value("fixture")
+            .hostOnlyDomain(edu.host).build()))
+        assertEquals(true, session.hasSessionCookies(AuthenticationProvider.EDUVULCAN))
+    }
+
     private class RecordingCookieJar : CookieJar {
         private val cookies = mutableListOf<Cookie>()
 

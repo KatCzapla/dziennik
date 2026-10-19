@@ -123,7 +123,7 @@ class WsFederationNavigatorTest {
     }
 
     @Test
-    fun maxStepsExceededGivesControlledError() {
+    fun cyclicFormGivesControlledError() {
         val client = scriptedClient(
             "https://login.test/start" to htmlResponse(
                 """
@@ -135,7 +135,7 @@ class WsFederationNavigatorTest {
         )
         val navigator = WsFederationNavigator(client, UonetHtmlFormParser())
 
-        assertThrows(AuthenticationException.WsFederationStepLimitExceeded::class.java) {
+        assertThrows(AuthenticationException.WsFederationCycleDetected::class.java) {
             navigator.follow(client.get("https://login.test/start"), "messages.test", maxSteps = 2)
         }
     }

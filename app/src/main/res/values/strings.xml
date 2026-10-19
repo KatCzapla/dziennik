@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="timetable_additional_lesson">Zajęcia dodatkowe</string>
+    <string name="timetable_annotation">Adnotacja: %1$d</string>
+    <string name="timetable_original_teacher">Pierwotny prowadzący: %1$s</string>
+    <string name="timetable_original_room">Pierwotna sala: %1$s</string>
     <string name="app_name">eDziennik</string>
+    <string name="session_verification_error_title">Nie udało się sprawdzić sesji</string>
+    <string name="session_verification_connection_error">Błąd połączenia. Sprawdź dostęp do internetu i spróbuj ponownie.</string>
+    <string name="session_verification_server_error">Serwer jest chwilowo niedostępny. Spróbuj ponownie.</string>
+    <string name="session_verification_invalid_response">Serwer zwrócił nieoczekiwaną odpowiedź. Nie potwierdzono wygaśnięcia sesji. Spróbuj ponownie.</string>
+    <string name="session_verification_retry">Spróbuj ponownie</string>
+    <string name="session_verification_manual_login">Przejdź do logowania</string>
     <string name="settings_title">Ustawienia</string>
     <string name="settings_back">Wróć</string>
     <string name="settings_student_section">UCZEŃ</string>

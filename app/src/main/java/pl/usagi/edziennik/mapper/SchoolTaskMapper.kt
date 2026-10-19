@@ -7,13 +7,14 @@ import pl.usagi.edziennik.domain.time.parseApiLocalDate
 import pl.usagi.edziennik.dto.HomeworkDetailsDto
 import pl.usagi.edziennik.dto.SchoolTaskDto
 import pl.usagi.edziennik.dto.TestDetailsDto
+import pl.usagi.edziennik.util.blankToNull
 
 fun SchoolTaskDto.toDomain(): SchoolTask =
     SchoolTask(
         type = SchoolTaskType.fromRawValue(type),
         rawType = type,
         date = parseApiLocalDate(date),
-        subject = subject.emptyToNull(),
+        subject = subject.blankToNull(),
         hasAttachment = hasAttachment,
         id = id,
     )
@@ -24,17 +25,14 @@ fun List<SchoolTaskDto>.toDomainSchoolTasks(): List<SchoolTask> =
 
 fun HomeworkDetailsDto.toDomainDetails(): SchoolTaskDetails =
     SchoolTaskDetails(
-        description = description.emptyToNull(),
-        teacher = teacher.emptyToNull(),
+        description = description.blankToNull(),
+        teacher = teacher.blankToNull(),
         responseDeadline = responseDeadline?.let(::parseApiLocalDate),
     )
 
 fun TestDetailsDto.toDomainDetails(): SchoolTaskDetails =
     SchoolTaskDetails(
-        description = description.emptyToNull(),
-        teacher = teacher.emptyToNull(),
+        description = description.blankToNull(),
+        teacher = teacher.blankToNull(),
         responseDeadline = null,
     )
-
-private fun String?.emptyToNull(): String? =
-    takeUnless { it.isNullOrBlank() }

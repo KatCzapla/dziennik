@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,7 +23,9 @@ import pl.usagi.edziennik.network.session.AuthenticationException
 import pl.usagi.edziennik.network.session.AuthenticationProvider
 import pl.usagi.edziennik.network.session.CurrentAuthenticationSession
 import pl.usagi.edziennik.network.session.SessionManager
+import pl.usagi.edziennik.network.session.SessionCheck
 import pl.usagi.edziennik.network.session.toLoggedInUser
+import pl.usagi.edziennik.network.session.authenticationDiagnostic
 import pl.usagi.edziennik.repository.MessagesRepository
 import pl.usagi.edziennik.repository.StudentRepository
 import pl.usagi.edziennik.persistence.changes.SnapshotStore
@@ -48,6 +51,8 @@ class LoginViewModel @Inject constructor(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
+    private var sessionVerificationJob: Job? = null
+    private var loginJob: Job? = null
 
     init {
         observeActiveStudent()
@@ -75,67 +80,74 @@ class LoginViewModel @Inject constructor(
 
     fun login() {
         val credentials = _uiState.value
-        if (!credentials.canSubmit) return
+        if (!credentials.canSubmit || loginJob?.isActive == true) return
 
-        viewModelScope.launch {
-            _uiState.update { state ->
-                state.copy(
-                    password = "",
-                    isLoading = true,
-                    errorMessage = null,
-                )
-            }
-
-            currentSession.clear()
-            val result = autoDetectLogin.authenticate(
-                username = credentials.login,
-                password = credentials.password,
-            )
-
-            when (result) {
-                is AutoDetectLoginResult.Success -> {
-                    currentSession.activate(result)
-                    val isValid = sessionManager.isSessionValid()
-                    if (!isValid) currentSession.clear()
-                    val credentialErrorMessage = if (isValid) {
-                        persistCredentialsAfterSuccessfulLogin(
-                            username = credentials.login,
-                            password = credentials.password,
-                            rememberCredentials = credentials.rememberCredentials,
-                            provider = result.provider,
-                        )
-                    } else {
-                        null
-                    }
-                    _uiState.update { state ->
-                        state.copy(
-                            isLoading = false,
-                            isSessionValid = isValid,
-                            errorMessage = credentialErrorMessage
-                                ?: if (isValid) null else "Sesja UONET+ nie została potwierdzona.",
-                        )
-                    }
-                    if (isValid) {
-                        replaceSnapshotAccount()
-                        loadLoggedInUser()
-                        loadStudents()
-                        scheduleSnapshotSyncIfAccountAvailable()
-                    }
+        loginJob = viewModelScope.launch {
+            currentSession.withManualLogin {
+                _uiState.update { state ->
+                    state.copy(
+                        password = "",
+                        isLoading = true,
+                        errorMessage = null,
+                    )
                 }
-                AutoDetectLoginResult.InvalidCredentials,
-                AutoDetectLoginResult.TransientError,
-                AutoDetectLoginResult.TechnicalError -> {
-                    val message = if (result == AutoDetectLoginResult.InvalidCredentials) {
-                        AuthenticationException.InvalidCredentials().toLoginErrorMessage()
-                    } else {
-                        "Proces logowania UONET+ nie zakończył się poprawnie."
+
+                currentSession.beginLogin()
+                val result = autoDetectLogin.authenticate(
+                    username = credentials.login,
+                    password = credentials.password,
+                )
+                currentSession.ensureAuthenticationCurrent()
+
+                when (result) {
+                    is AutoDetectLoginResult.Success -> {
+                        val pendingProject = currentSession.hasProjectLoginCandidate()
+                        if (!pendingProject) currentSession.activate(result)
+                        val isValid = sessionManager.isSessionValid()
+                        currentSession.ensureAuthenticationCurrent()
+                        if (isValid && pendingProject) currentSession.activate(result)
+                        if (!isValid && !pendingProject) currentSession.clear()
+                        val credentialErrorMessage = if (isValid) {
+                            persistCredentialsAfterSuccessfulLogin(
+                                username = credentials.login,
+                                password = credentials.password,
+                                rememberCredentials = credentials.rememberCredentials,
+                                provider = result.provider,
+                            )
+                        } else {
+                            null
+                        }
+                        currentSession.ensureAuthenticationCurrent()
+                        _uiState.update { state ->
+                            state.copy(
+                                isLoading = false,
+                                isSessionValid = isValid,
+                                errorMessage = credentialErrorMessage
+                                    ?: if (isValid) null else "Sesja UONET+ nie została potwierdzona.",
+                            )
+                        }
+                        if (isValid) {
+                            replaceSnapshotAccount()
+                            loadLoggedInUser()
+                            loadStudents()
+                            scheduleSnapshotSyncIfAccountAvailable()
+                        }
                     }
-                    _uiState.update { state ->
-                        state.copy(
-                            isLoading = false,
-                            isSessionValid = false,
-                            errorMessage = message,
-                        )
+                    AutoDetectLoginResult.InvalidCredentials,
+                    AutoDetectLoginResult.TransientError,
+                    AutoDetectLoginResult.TechnicalError -> {
+                        val message = if (result == AutoDetectLoginResult.InvalidCredentials) {
+                            AuthenticationException.InvalidCredentials().toLoginErrorMessage()
+                        } else {
+                            "Proces logowania UONET+ nie zakończył się poprawnie."
+                        }
+                        _uiState.update { state ->
+                            state.copy(
+                                isLoading = false,
+                                isSessionValid = false,
+                                errorMessage = message,
+                            )
+                        }
                     }
                 }
             }
@@ -150,109 +162,165 @@ class LoginViewModel @Inject constructor(
     }
 
     fun clearSession() {
+        sessionVerificationJob?.cancel()
+        loginJob?.cancel()
+        val oldAccountId = localSnapshotIdentity.clearAccount()
+        currentSession.invalidateAuthentication()
         viewModelScope.launch {
-            val oldAccountId = localSnapshotIdentity.clearAccount()
+            authenticationDiagnostic("UI_LOGOUT", "EXPLICIT_REQUEST")
             widgetUpdater.updateSafely()
             syncScheduler.cancel()
-            sessionManager.clearSession()
-            currentSession.clear()
-            autoLoginSettings.setAutoLoginEnabled(false)
-            autoLoginSettings.setAuthenticationProvider(null)
-            activeStudentManager.clear()
-            oldAccountId?.let { deleteSnapshotsSafely(it) }
-            _uiState.update {
-                LoginUiState(
-                    isCheckingSession = false,
-                    rememberCredentials = credentialStore.hasCredentials(),
-                )
+            currentSession.withAuthentication {
+                sessionManager.clearSession()
+                currentSession.clear()
+                autoLoginSettings.setAutoLoginEnabled(false)
+                autoLoginSettings.setAuthenticationProvider(null)
+                activeStudentManager.clear()
+                oldAccountId?.let { deleteSnapshotsSafely(it) }
+                _uiState.update {
+                    LoginUiState(
+                        isCheckingSession = false,
+                        rememberCredentials = credentialStore.hasCredentials(),
+                    )
+                }
             }
         }
     }
 
     fun clearStoredCredentials() {
         viewModelScope.launch {
-            credentialStore.clear()
-            autoLoginSettings.setAutoLoginEnabled(false)
-            autoLoginSettings.setAuthenticationProvider(null)
-            _uiState.update { state ->
-                state.copy(rememberCredentials = false)
+            currentSession.withAuthentication {
+                authenticationDiagnostic("UI_CREDENTIALS", "EXPLICIT_REMOVE_REQUEST")
+                credentialStore.clear()
+                autoLoginSettings.setAutoLoginEnabled(false)
+                autoLoginSettings.setAuthenticationProvider(null)
+                _uiState.update { state ->
+                    state.copy(rememberCredentials = false)
+                }
             }
         }
     }
 
+    fun retrySessionVerification() {
+        if (_uiState.value.sessionVerificationError != null && !_uiState.value.isCheckingSession) {
+            checkPersistedSession()
+        }
+    }
+
+    fun openManualLogin() {
+        if (_uiState.value.sessionVerificationError != null && !_uiState.value.isCheckingSession) {
+            showLoginForm()
+        }
+    }
+
+    private fun showLoginForm() {
+        _uiState.update { it.copy(
+            isCheckingSession = false,
+            isSessionValid = false,
+            isLoadingStudents = false,
+            sessionVerificationError = null,
+            errorMessage = null,
+        ) }
+    }
+
     private fun checkPersistedSession() {
-        viewModelScope.launch {
-            val savedProvider = autoLoginSettings.getAuthenticationProvider()
-            currentSession.restore(savedProvider ?: AuthenticationProvider.PROJECT_UONET)
-            val isValid = sessionManager.validatePersistedSession()
-            if (isValid) {
-                runCatching { localSnapshotIdentity.ensureAccountId() }
-                if (savedProvider == null) {
-                    autoLoginSettings.setAuthenticationProvider(AuthenticationProvider.PROJECT_UONET)
+        _uiState.update { it.copy(isCheckingSession = true, sessionVerificationError = null, errorMessage = null) }
+        sessionVerificationJob = viewModelScope.launch {
+            currentSession.withAuthentication {
+                if (localSnapshotIdentity.currentAccountId() == null) {
+                    showLoginForm()
+                    return@withAuthentication
                 }
-                loadLoggedInUser()
+                val savedProvider = autoLoginSettings.getAuthenticationProvider()
+                val provider = currentSession.provider ?: savedProvider ?: AuthenticationProvider.PROJECT_UONET
+                val hasCookies = currentSession.hasSessionCookies(provider)
+                val credentialsWithoutCookies = if (!hasCookies && savedProvider != null && autoLoginSettings.isAutoLoginEnabled()) {
+                    credentialStore.load()?.takeIf { it.username.isNotBlank() && it.password.isNotBlank() }
+                } else null
+                currentSession.ensureAuthenticationCurrent()
+                if (!hasCookies && credentialsWithoutCookies == null) {
+                    showLoginForm()
+                    return@withAuthentication
+                }
+                if (hasCookies) {
+                    if (currentSession.provider == null) currentSession.restore(provider)
+                    val checked = sessionManager.checkSession()
+                    currentSession.ensureAuthenticationCurrent()
+                    authenticationDiagnostic("UI_RESTORE_SESSION", checked.name)
+                    if (checked != SessionCheck.VALID && checked != SessionCheck.EXPIRED) {
+                        showSessionVerificationError(checked)
+                        return@withAuthentication
+                    }
+                    if (checked == SessionCheck.VALID) {
+                        if (savedProvider == null) autoLoginSettings.setAuthenticationProvider(provider)
+                        loadLoggedInUser()
+                        _uiState.update { state ->
+                            state.copy(
+                                isCheckingSession = false,
+                                isSessionValid = true,
+                                errorMessage = null,
+                            )
+                        }
+                        loadStudents()
+                        scheduleSnapshotSyncIfAccountAvailable()
+                        return@withAuthentication
+                    }
+
+                    sessionManager.clearSession()
+                    currentSession.clear()
+                    authenticationDiagnostic("UI_RESTORE_SESSION", "IN_MEMORY_SESSION_DETACHED")
+                }
+
+                if (!autoLoginSettings.isAutoLoginEnabled()) {
+                    _uiState.update { state ->
+                        state.copy(
+                            isCheckingSession = false,
+                            isSessionValid = false,
+                            rememberCredentials = false,
+                            errorMessage = null,
+                        )
+                    }
+                    return@withAuthentication
+                }
+
+                val storedCredentials = credentialsWithoutCookies ?: credentialStore.load()
+                if (storedCredentials == null) {
+                    autoLoginSettings.setAutoLoginEnabled(false)
+                    _uiState.update { state ->
+                        state.copy(
+                            isCheckingSession = false,
+                            isSessionValid = false,
+                            rememberCredentials = false,
+                            errorMessage = null,
+                        )
+                    }
+                    return@withAuthentication
+                }
+
+                _uiState.update { state ->
+                    state.copy(rememberCredentials = true)
+                }
+
+                if (savedProvider == null) autoLoginSettings.setAutoLoginEnabled(false)
+                val renewed = savedProvider?.let { renewSession(storedCredentials, it) } ?: false
+                if (_uiState.value.sessionVerificationError != null) return@withAuthentication
                 _uiState.update { state ->
                     state.copy(
                         isCheckingSession = false,
-                        isSessionValid = true,
-                        errorMessage = null,
+                        isSessionValid = renewed,
+                        errorMessage = if (renewed) {
+                            null
+                        } else {
+                            "Sesja wygasła. Zaloguj się ponownie."
+                        },
                     )
                 }
-                loadStudents()
-                scheduleSnapshotSyncIfAccountAvailable()
-                return@launch
-            }
-
-            currentSession.clear()
-
-            if (!autoLoginSettings.isAutoLoginEnabled()) {
-                _uiState.update { state ->
-                    state.copy(
-                        isCheckingSession = false,
-                        isSessionValid = false,
-                        rememberCredentials = false,
-                        errorMessage = null,
-                    )
+                if (renewed) {
+                    runCatching { localSnapshotIdentity.ensureAccountId() }
+                    loadLoggedInUser()
+                    loadStudents()
+                    scheduleSnapshotSyncIfAccountAvailable()
                 }
-                return@launch
-            }
-
-            val storedCredentials = credentialStore.load()
-            if (storedCredentials == null) {
-                autoLoginSettings.setAutoLoginEnabled(false)
-                _uiState.update { state ->
-                    state.copy(
-                        isCheckingSession = false,
-                        isSessionValid = false,
-                        rememberCredentials = false,
-                        errorMessage = null,
-                    )
-                }
-                return@launch
-            }
-
-            _uiState.update { state ->
-                state.copy(rememberCredentials = true)
-            }
-
-            if (savedProvider == null) autoLoginSettings.setAutoLoginEnabled(false)
-            val renewed = savedProvider?.let { renewSession(storedCredentials, it) } ?: false
-            _uiState.update { state ->
-                state.copy(
-                    isCheckingSession = false,
-                    isSessionValid = renewed,
-                    errorMessage = if (renewed) {
-                        null
-                    } else {
-                        "Sesja wygasła. Zaloguj się ponownie."
-                    },
-                )
-            }
-            if (renewed) {
-                runCatching { localSnapshotIdentity.ensureAccountId() }
-                loadLoggedInUser()
-                loadStudents()
-                scheduleSnapshotSyncIfAccountAvailable()
             }
         }
     }
@@ -261,16 +329,36 @@ class LoginViewModel @Inject constructor(
         credentials: StoredCredentials,
         provider: AuthenticationProvider,
     ): Boolean {
+        currentSession.beginLogin()
         val result = autoDetectLogin.authenticateWithProvider(
             provider = provider,
             username = credentials.username,
             password = credentials.password,
         )
+        currentSession.ensureAuthenticationCurrent()
+        authenticationDiagnostic("UI_AUTO_LOGIN", when (result) {
+            is AutoDetectLoginResult.Success -> "AUTHENTICATED"
+            AutoDetectLoginResult.InvalidCredentials -> "INVALID_CREDENTIALS"
+            AutoDetectLoginResult.TransientError -> "TRANSIENT_ERROR"
+            AutoDetectLoginResult.TechnicalError -> "TECHNICAL_ERROR"
+        })
         if (result !is AutoDetectLoginResult.Success) return false
         currentSession.activate(result)
-        val isValid = sessionManager.isSessionValid()
-        if (!isValid) sessionManager.clearSession()
-        return isValid
+        val checked = sessionManager.checkSession()
+        currentSession.ensureAuthenticationCurrent()
+        if (checked != SessionCheck.VALID && checked != SessionCheck.EXPIRED) {
+            showSessionVerificationError(checked)
+            return false
+        }
+        if (checked == SessionCheck.EXPIRED) {
+            authenticationDiagnostic("UI_AUTO_LOGIN_VERIFY", "EXPIRED_CLEAR_SESSION")
+            sessionManager.clearSession()
+        }
+        return checked == SessionCheck.VALID
+    }
+
+    private fun showSessionVerificationError(checked: SessionCheck) {
+        _uiState.update { it.copy(isCheckingSession = false, sessionVerificationError = checked) }
     }
 
     private fun scheduleSnapshotSyncIfAccountAvailable() {
@@ -368,6 +456,7 @@ class LoginViewModel @Inject constructor(
 
         runCatching { studentRepository.getStudents() }
             .onSuccess { students ->
+                currentSession.ensureAuthenticationCurrent()
                 activeStudentManager.initialize(students)
                 val selected = runCatching { localSnapshotIdentity.selectedStudentScopeId() }.getOrNull()
                 if (selected != null) {
@@ -384,6 +473,7 @@ class LoginViewModel @Inject constructor(
                 }
             }
             .onFailure {
+                if (it is CancellationException) throw it
                 activeStudentManager.clear()
                 _uiState.update { state ->
                     state.copy(

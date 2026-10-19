@@ -173,7 +173,7 @@ private fun AttendanceScreen(
                     Box(modifier = Modifier.clip(RoundedCornerShape(12.dp))) {
                         TextButton(
                             onClick = onOpenExcuse,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                            border = BorderStroke(1.dp,MaterialTheme.colorScheme.outline.copy(alpha = 0.54f)),
                             colors = ButtonDefaults.textButtonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -568,7 +568,7 @@ private fun AttendanceTimeline() {
         modifier = Modifier
             .width(1.dp)
             .height(64.dp)
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)),
+            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.54f)),
     )
 }
 

@@ -49,6 +49,7 @@ import pl.usagi.edziennik.persistence.changes.SyncDiagnosticEntry
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
 import pl.usagi.edziennik.domain.Student
 import pl.usagi.edziennik.ui.login.LoginViewModel
+import pl.usagi.edziennik.util.uppercaseLocalized
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -62,8 +63,8 @@ fun SettingsRoute(
     loginViewModel: LoginViewModel,
 ) {
     val state by loginViewModel.uiState.collectAsState()
-    val students = remember(state.students) {
-        listOf(
+    val students_for_test = remember(state.students) {
+        state.students + listOf(
             Student(
                 key = "student_001",
                 diaryId = 1,
@@ -89,9 +90,8 @@ fun SettingsRoute(
                 organizationalUnitId = 101
             )
         )
-
     }
-    SettingsScreen(state.activeStudent, /*state.students*/students, loginViewModel::selectStudent,
+    SettingsScreen(state.activeStudent, state.students, loginViewModel::selectStudent,
         onOpenDiagnostics, onLogout, onBack)
 }
 
@@ -107,7 +107,7 @@ internal fun SettingsScreen(
     val spacing = EDziennikTheme.spacing
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { SettingsTopBar(onBack, stringResource(R.string.settings_title)) },
+        topBar = { SettingsTopBar(onBack) },
     ) { padding ->
         LazyColumn(
             modifier = Modifier
@@ -117,74 +117,71 @@ internal fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(spacing.lg),
         ) {
             item {
+                SettingsTitle(stringResource(R.string.settings_title))
+            }
+            item {
                 Column(verticalArrangement = Arrangement.spacedBy(spacing.xs)) {
                     SettingsSectionTitle(stringResource(R.string.settings_student_section))
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                    ) {
-                        Column {
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = spacing.md),
+                            horizontalArrangement = Arrangement.spacedBy(spacing.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Outlined.School, contentDescription = null,
+                                modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
+                                Text(
+                                    stringResource(R.string.settings_current_student),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(spacing.xxs),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = student?.name
+                                            ?: stringResource(R.string.settings_no_student),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+
+                                    student?.className
+                                        ?.takeIf { it.isNotEmpty() }
+                                        ?.let { className ->
+                                            Text(
+                                                text = "($className)",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                }
+                            }
+                        }
+                        students.filter { it.diaryId != student?.diaryId }.forEach { other ->
+                            HorizontalDivider(modifier = Modifier.padding(),
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(spacing.md),
+                                    .clickable(role = Role.Button) { onStudentSelected(other) }
+                                    .heightIn(min = 48.dp)
+                                    .padding(vertical = spacing.sm),
                                 horizontalArrangement = Arrangement.spacedBy(spacing.sm),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(Icons.Outlined.School, contentDescription = null,
-                                    modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
-                                    Text(
-                                        stringResource(R.string.settings_current_student),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(spacing.xxs),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            text = student?.name
-                                                ?: stringResource(R.string.settings_no_student),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-
-                                        student?.className
-                                            ?.takeIf { it.isNotEmpty() }
-                                            ?.let { className ->
-                                                Text(
-                                                    text = "($className)",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                    }
+                                    Text(other.name, style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    val details = listOf(other.className, other.schoolName).filter(String::isNotBlank).joinToString(" · ")
+                                    if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                            }
-                            students.filter { it.diaryId != student?.diaryId }.forEach { other ->
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = spacing.sm),
-                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable(role = Role.Button) { onStudentSelected(other) }
-                                        .heightIn(min = 48.dp)
-                                        .padding(horizontal = spacing.md, vertical = spacing.sm),
-                                    horizontalArrangement = Arrangement.spacedBy(spacing.sm),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
-                                        Text(other.name, style = MaterialTheme.typography.labelLarge,
-                                            color = MaterialTheme.colorScheme.onSurface)
-                                        val details = listOf(other.className, other.schoolName).filter(String::isNotBlank).joinToString(" · ")
-                                        if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null,
-                                        modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                                }
+                                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null,
+                                    modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
@@ -193,40 +190,35 @@ internal fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(spacing.xs)) {
                     SettingsSectionTitle(stringResource(R.string.settings_sync_section))
-                    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(role = Role.Button, onClick = onOpenDiagnostics)
-                                .padding(spacing.md),
-                            horizontalArrangement = Arrangement.spacedBy(spacing.sm),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.primary)
-                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
-                                Text(stringResource(R.string.sync_diagnostics_title), style = MaterialTheme.typography.titleMedium)
-                                Text(stringResource(R.string.settings_diagnostics_description), style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null,
-                                modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(role = Role.Button, onClick = onOpenDiagnostics)
+                            .padding(vertical = spacing.md),
+                        horizontalArrangement = Arrangement.spacedBy(spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary)
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
+                            Text(stringResource(R.string.sync_diagnostics_title), style = MaterialTheme.typography.titleMedium)
+                            Text(stringResource(R.string.settings_diagnostics_description), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null,
+                            modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(spacing.xs)) {
                     SettingsSectionTitle(stringResource(R.string.settings_account_section))
-                    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable(role = Role.Button, onClick = onLogout)
                                 .heightIn(min = 52.dp)
-                                .padding(horizontal = spacing.md, vertical = spacing.sm),
+                                .padding(vertical = spacing.sm),
                             horizontalArrangement = Arrangement.spacedBy(spacing.sm),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -235,7 +227,6 @@ internal fun SettingsScreen(
                             Text(stringResource(R.string.settings_logout), style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.error)
                         }
-                    }
                 }
             }
         }
@@ -248,7 +239,7 @@ private fun SettingsSectionTitle(title: String) {
 }
 
 @Composable
-private fun SettingsTopBar(onBack: () -> Unit, title: String? = null) {
+private fun SettingsTopBar(onBack: () -> Unit) {
     val spacing = EDziennikTheme.spacing
     Row(
         modifier = Modifier
@@ -261,7 +252,23 @@ private fun SettingsTopBar(onBack: () -> Unit, title: String? = null) {
         IconButton(onClick = onBack) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.settings_back))
         }
-        if (title != null) Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+    }
+}
+
+@Composable
+private fun SettingsTitle(title: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
     }
 }
 
@@ -292,19 +299,7 @@ internal fun SyncDiagnosticsScreen(state: SettingsUiState, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(spacing.lg),
         ) {
             item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(40.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = stringResource(R.string.sync_diagnostics_title),
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
-                    )
-                }
+                SettingsTitle(stringResource(R.string.sync_diagnostics_title))
             }
             item {
                 SettingsSectionTitle(stringResource(R.string.sync_diagnostics_current_state))
@@ -340,17 +335,29 @@ internal fun SyncDiagnosticsScreen(state: SettingsUiState, onBack: () -> Unit) {
                         }
                     }
                     item {
-                        Text(stringResource(R.string.sync_diagnostics_last_attempt), style = MaterialTheme.typography.titleSmall)
-                        state.history.firstOrNull()?.let { entry ->
-                            Text(stringResource(R.string.sync_diagnostics_attempt_summary,
-                                entry.startedAt.displayTime(), stringResource(diagnosticResultResource(entry.result))),
-                                style = MaterialTheme.typography.bodyMedium)
-                        } ?: Text(stringResource(R.string.sync_diagnostics_never_started),
-                            style = MaterialTheme.typography.bodyMedium)
+                        Column(verticalArrangement = Arrangement.spacedBy(spacing.xs)) {
+                            Text(
+                                stringResource(R.string.sync_diagnostics_last_attempt),
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            state.history.firstOrNull()?.let { entry ->
+                                Text(
+                                    stringResource(
+                                        R.string.sync_diagnostics_attempt_summary,
+                                        entry.startedAt.displayTime(),
+                                        stringResource(diagnosticResultResource(entry.result))
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            } ?: Text(
+                                stringResource(R.string.sync_diagnostics_never_started),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
                     }
                     if (state.history.isNotEmpty()) {
                         item {
-                            Text(stringResource(R.string.sync_diagnostics_history), style = MaterialTheme.typography.titleSmall)
+                            Text(stringResource(R.string.sync_diagnostics_history).uppercaseLocalized(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                         }
                         items(state.history, key = { it.id }) { DiagnosticHistoryEntry(it) }
                     }
@@ -377,8 +384,17 @@ private fun DiagnosticValue(label: String, value: String) {
 @Composable
 private fun DiagnosticHistoryEntry(entry: SyncDiagnosticEntry) {
     Column(verticalArrangement = Arrangement.spacedBy(EDziennikTheme.spacing.xxs)) {
-        Text(stringResource(if (entry.source == "MANUAL") R.string.sync_diagnostics_manual else R.string.sync_diagnostics_periodic_source),
-            style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text(
+            stringResource(
+                if (entry.source == "MANUAL")
+                    R.string.sync_diagnostics_manual
+                else
+                    R.string.sync_diagnostics_periodic_source
+            ),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(bottom = EDziennikTheme.spacing.xs)
+        )
         DiagnosticValue(stringResource(R.string.sync_diagnostics_start), entry.startedAt.displayTime())
         DiagnosticValue(stringResource(R.string.sync_diagnostics_end),
             entry.finishedAt?.displayTime() ?: stringResource(R.string.sync_diagnostics_unfinished))

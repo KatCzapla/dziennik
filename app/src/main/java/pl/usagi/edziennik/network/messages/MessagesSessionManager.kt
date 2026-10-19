@@ -3,6 +3,7 @@ package pl.usagi.edziennik.network.messages
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import pl.usagi.edziennik.network.session.SessionManager
+import pl.usagi.edziennik.network.session.CurrentAuthenticationSession
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -13,24 +14,27 @@ class MessagesSessionManager @Inject constructor(
     private val messagesSsoClient: MessagesSsoClient,
     private val messagesApiClient: MessagesApiClient,
     private val sessionStore: MessagesSessionStore,
+    private val currentSession: CurrentAuthenticationSession,
 ) {
     private val mutex = Mutex()
 
-    suspend fun ensureMessagesSession(): MessagesSessionContext = mutex.withLock {
-        MessagesDiagnostics.debug("Messages session ensure started")
-        if (!sessionManager.validatePersistedSession()) {
-            sessionStore.clear()
-            MessagesDiagnostics.warn("Messages session failed: mainSessionValid=false")
-            throw MessagesSessionException.MainSessionInvalid
-        }
-        MessagesDiagnostics.debug("Messages session main session valid")
+    suspend fun ensureMessagesSession(): MessagesSessionContext = currentSession.withAuthentication {
+        mutex.withLock {
+            MessagesDiagnostics.debug("Messages session ensure started")
+            if (!sessionManager.validatePersistedSession()) {
+                sessionStore.clear()
+                MessagesDiagnostics.warn("Messages session failed: mainSessionValid=false")
+                throw MessagesSessionException.MainSessionInvalid
+            }
+            MessagesDiagnostics.debug("Messages session main session valid")
 
-        sessionStore.get()?.let { existingContext ->
-            MessagesDiagnostics.debug("Messages session already available: ${existingContext.appUrl.safeHostAndPath()}")
-            return@withLock existingContext
-        }
+            sessionStore.get()?.let { existingContext ->
+                MessagesDiagnostics.debug("Messages session already available: ${existingContext.appUrl.safeHostAndPath()}")
+                return@withLock existingContext
+            }
 
-        bootstrapMessagesSession()
+            bootstrapMessagesSession()
+        }
     }
 
     fun clear() {
@@ -51,7 +55,7 @@ class MessagesSessionManager @Inject constructor(
         val context = messagesSsoClient.authenticate(appUrl)
         MessagesDiagnostics.debug("Messages validating session using unread count")
         messagesApiClient.getUnreadCounts(context)
-        sessionStore.save(context)
+        currentSession.commitAuthenticationState { sessionStore.save(context) }
         MessagesDiagnostics.debug("Messages session bootstrap completed")
         return context
     }

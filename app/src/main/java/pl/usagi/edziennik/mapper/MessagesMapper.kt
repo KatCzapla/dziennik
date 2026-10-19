@@ -9,6 +9,7 @@ import pl.usagi.edziennik.dto.MailboxDto
 import pl.usagi.edziennik.dto.MessageAttachmentDto
 import pl.usagi.edziennik.dto.MessageDetailsDto
 import pl.usagi.edziennik.dto.ReceivedMessageDto
+import pl.usagi.edziennik.util.blankToNull
 
 fun ReceivedMessageDto.toDomain(): ReceivedMessage =
     ReceivedMessage(
@@ -33,7 +34,7 @@ fun MessageDetailsDto.toDomain(): MessageDetails =
         date = parseApiLocalDateTime(date),
         read = read,
         attachments = attachments.map { it.toDomain() },
-        senderInfo = senderInfo.takeUnless { it.isNullOrBlank() },
+        senderInfo = senderInfo.blankToNull(),
         withdrawn = withdrawn,
         withdrawnAt = withdrawnAt?.takeUnless { it.isBlank() }?.let(::parseApiLocalDateTime),
     )

@@ -19,6 +19,7 @@ import pl.usagi.edziennik.network.session.CurrentAuthenticationSession
 import pl.usagi.edziennik.network.session.SessionManager
 import pl.usagi.edziennik.network.session.SharedPreferencesAutoLoginSettings
 import pl.usagi.edziennik.network.session.UonetSessionManager
+import pl.usagi.edziennik.network.messages.MessagesSessionStore
 import java.time.Clock
 import java.time.Duration
 import java.time.ZoneId
@@ -53,15 +54,25 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideCurrentAuthenticationSession(cookieJar: PersistentCookieJar): CurrentAuthenticationSession =
-        CurrentAuthenticationSession(cookieJar)
+    fun provideCurrentAuthenticationSession(
+        cookieJar: PersistentCookieJar,
+        messagesSessionStore: MessagesSessionStore,
+    ): CurrentAuthenticationSession = CurrentAuthenticationSession(
+        cookieJar,
+        clearStoredSession = {
+            cookieJar.clear()
+            messagesSessionStore.clear()
+        },
+        replaceProjectCookies = cookieJar::replaceCookies,
+    )
 
     @Provides
     fun provideEduVulcanLogin(
         okHttpClient: OkHttpClient,
         json: Json,
         cookieJar: PersistentCookieJar,
-    ): EduVulcanLogin = EduVulcanLogin(okHttpClient, json, cookieJar)
+        currentSession: CurrentAuthenticationSession,
+    ): EduVulcanLogin = EduVulcanLogin(okHttpClient, json, cookieJar, currentSession)
 
     @Provides
     fun provideAutoDetectLogin(
@@ -93,11 +104,13 @@ object NetworkModule {
         OkHttpClient.Builder()
             .cookieJar(currentSession)
             .addInterceptor { chain ->
-                val request = currentSession.route(chain.request())
-                    .newBuilder()
-                    .header("User-Agent", USER_AGENT)
-                    .build()
-                chain.proceed(request)
+                currentSession.withRequestSession {
+                    val request = currentSession.route(chain.request())
+                        .newBuilder()
+                        .header("User-Agent", USER_AGENT)
+                        .build()
+                    chain.proceed(request)
+                }
             }
             .connectTimeout(Duration.ofSeconds(30))
             .readTimeout(Duration.ofSeconds(30))

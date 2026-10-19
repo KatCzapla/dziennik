@@ -1,12 +1,10 @@
 package pl.usagi.edziennik.ui.grades
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -30,25 +27,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,10 +60,9 @@ import pl.usagi.edziennik.domain.SubjectGrades
 import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.components.EmptyState
 import pl.usagi.edziennik.ui.components.ErrorState
-import pl.usagi.edziennik.ui.theme.EDziennikTheme
 import pl.usagi.edziennik.ui.navigation.GradeNavigationTarget
-import java.math.BigDecimal
-import kotlin.text.isNotBlank
+import pl.usagi.edziennik.ui.theme.EDziennikTheme
+import pl.usagi.edziennik.util.uppercaseLocalized
 
 @Composable
 fun GradesRoute(
@@ -138,10 +131,12 @@ private fun GradesScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(horizontal = spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(spacing.lg),
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(spacing.md)) {
+                Column(
+                    modifier = Modifier.padding(),
+                    verticalArrangement = Arrangement.spacedBy(spacing.md)
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -197,11 +192,16 @@ private fun GradesScreen(
                 }
 
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = spacing.lg),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
-                            text = "Przedmioty",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            text = "Przedmioty".uppercaseLocalized(),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }
@@ -214,16 +214,6 @@ private fun GradesScreen(
                         subject = subject,
                         onClick = { onOpenSubject(subject.position) },
                     )
-
-                    if (index != visibleSubjects.lastIndex) {
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                        )
-                    }
-                }
-
-                item {
-                    Spacer(modifier = Modifier.height(spacing.md))
                 }
             } else if (!state.isLoading && state.errorMessage == null) {
                 item {
@@ -301,13 +291,15 @@ private fun RecentGradesSection(
     val spacing = EDziennikTheme.spacing
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(spacing.md),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(spacing.lg),
     ) {
         Text(
-            text = "Ostatnie oceny",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            text = "Ostatnie oceny".uppercaseLocalized(),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
         )
 
         if (recentGrades.isEmpty()) {
@@ -327,17 +319,10 @@ private fun RecentGradesSection(
                         append(
                             recentGrade.grade.date.format(
                                 shortGradeDateFormatter,
-                            ),
+                            )
                         )
                     },
                 )
-
-                if (index != recentGrades.lastIndex) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 60.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                    )
-                }
             }
         }
     }
@@ -354,8 +339,7 @@ private fun SubjectGradesRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = spacing.sm),
+            .clickable(onClick = onClick),
         verticalArrangement = Arrangement.spacedBy(spacing.md),
     ) {
         Row(
@@ -395,6 +379,8 @@ private fun SubjectGradesRow(
                 subtitle = grade.date.format(shortGradeDateFormatter),
             )
         }
+
+        Spacer(modifier = Modifier.height(spacing.md))
     }
 }
 
@@ -426,41 +412,38 @@ private fun GradePreviewRow(
 
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(spacing.xxs),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (grade.changedSinceLastLogin) {
-                    Box(
-                        modifier = Modifier
-                            .padding(spacing.xs)
-                            .size(5.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.tertiary),
-                    )
+            if (grade.changedSinceLastLogin || title.isNotEmpty())
+                Row() {
+                    if (grade.changedSinceLastLogin) {
+                        Box(
+                            modifier = Modifier
+                                .padding(spacing.xs)
+                                .size(5.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.tertiary),
+                        )
+                    }
+
+                    if (title.isNotEmpty())
+                        Text(
+                            text = title,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                 }
 
+            if (subtitle.isNotEmpty())
                 Text(
-                    text = title,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = FontWeight.Medium,
-                        lineHeight = 20.sp,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-            }
-
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
@@ -535,11 +518,9 @@ private fun GradesSubjectScreen(
 
             item {
                 Text(
-                    text = "Oceny",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = "Oceny".uppercaseLocalized(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
 
@@ -568,10 +549,6 @@ private fun GradesSubjectScreen(
                         onTargetShown = { targetShown = true },
                     )
                 }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(spacing.lg))
             }
         }
     }
@@ -760,13 +737,6 @@ private fun SubjectGradesSection(
                 includeGradeWeight = includeGradeWeight,
                 modifier = Modifier.bringIntoViewRequester(requester),
             )
-
-            if (index != grades.lastIndex) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = 56.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                )
-            }
         }
     }
 }
@@ -778,16 +748,16 @@ private fun GradeValueBadge(
 ) {
     Box(
         modifier = modifier
-            .size(40.dp)
+            .width(40.dp)
+            .height(IntrinsicSize.Min)
+            .heightIn(min = 40.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.secondaryContainer),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = value,
-            style = MaterialTheme.typography.titleSmall.copy(
-                fontWeight = FontWeight.Bold,
-            ),
+            style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSecondaryContainer,
             fontWeight = FontWeight.SemiBold,
             softWrap = true,
@@ -848,9 +818,7 @@ private fun GradeDetailsRow(
                 }
                 Text(
                     text = name,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        lineHeight = 20.sp,
-                    ),
+                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
@@ -878,7 +846,7 @@ private fun GradeDetailsRow(
             if (firstLine.isNotEmpty()) {
                 Text(
                     text = firstLine.joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

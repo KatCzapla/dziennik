@@ -41,12 +41,16 @@ import pl.usagi.edziennik.ui.components.EDziennikTopBar
 import pl.usagi.edziennik.ui.components.EmptyState
 import pl.usagi.edziennik.ui.components.ErrorState
 import pl.usagi.edziennik.ui.theme.EDziennikTheme
+import pl.usagi.edziennik.util.uppercaseLocalized
+import java.util.Locale
 
 @Composable
 fun PaymentsRoute(onBack: () -> Unit, onOpenSettings: () -> Unit, viewModel: PaymentsViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsState()
     PaymentsScreen(state, onBack, onOpenSettings, viewModel::retry)
 }
+
+private val locale = Locale.forLanguageTag("pl-PL")
 
 @Composable
 private fun PaymentsScreen(
@@ -147,7 +151,6 @@ private fun AccountSection(account: BankAccountPayment) {
                 }
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -199,7 +202,6 @@ private fun MonthlySection(payment: MonthlyPayment) {
                 }
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -214,7 +216,7 @@ private fun PaymentField(label: String?, value: String?) {
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+    Text(text.uppercaseLocalized(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
 }
 
 @Composable

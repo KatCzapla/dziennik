@@ -2,6 +2,11 @@ package pl.usagi.edziennik.network.session
 
 import android.app.Application
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import pl.usagi.edziennik.network.NetworkModule
 import kotlinx.serialization.json.Json
 import okhttp3.Cookie
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -27,6 +32,8 @@ import pl.usagi.edziennik.network.timetable.UonetTimetableDataSource
 import pl.usagi.edziennik.domain.ActiveStudentManager
 import java.time.LocalDate
 import org.robolectric.shadows.ShadowLog
+import com.sun.net.httpserver.HttpServer
+import java.net.InetSocketAddress
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33], application = Application::class)
@@ -158,12 +165,227 @@ class UonetSessionVerificationTest {
         assertEquals(1, jar.loadForRequest(url).size)
     }
 
+    @Test fun invalidResponsesExposeSafeReasonsWithoutResponseData() = runBlocking {
+        data class Case(val code: Int, val body: String, val type: String?, val reason: String)
+        val cases = listOf(
+            Case(403, "private-body", "application/json", "UNEXPECTED_HTTP_STATUS"),
+            Case(204, "", "application/json", "UNEXPECTED_HTTP_STATUS"),
+            Case(200, "<html>private-body</html>", "text/html", "UNEXPECTED_CONTENT_TYPE"),
+            Case(200, "{\"uczniowie\":[]}", null, "MISSING_CONTENT_TYPE"),
+            Case(200, "private-invalid-json", "application/json", "INVALID_JSON"),
+            Case(200, "[]", "application/json", "INVALID_JSON_OBJECT"),
+            Case(200, "null", "application/json", "INVALID_JSON_OBJECT"),
+            Case(200, "{\"private-field\":\"private-value\"}", "application/json", "MISSING_STUDENTS_FIELD"),
+        )
+        for (case in cases) {
+            ShadowLog.clear()
+            val checked = manager(code = case.code, body = case.body, contentType = case.type,
+                redirect = "https://private-host.example/unknown?token=private-token").checkSession()
+            assertEquals(case.reason, SessionCheck.INVALID_RESPONSE, checked)
+            val logs = ShadowLog.getLogsForTag("UonetAuth").map { it.msg }.joinToString()
+            assertTrue(logs, logs.contains("reason=${case.reason}"))
+            assertFalse(logs, logs.contains("private-"))
+            assertEquals(1, jar.loadForRequest(url).size)
+        }
+    }
+
+    @Test fun studentsFieldPresenceRatherThanItsContentsDeterminesValidResponse() = runBlocking {
+        for (body in listOf("{\"uczniowie\":[]}", "{\"uczniowie\":null}")) {
+            ShadowLog.clear()
+            assertEquals(SessionCheck.VALID, manager(body = body).checkSession())
+            assertTrue(ShadowLog.getLogsForTag("UonetAuth").any {
+                it.msg.contains("reason=STUDENTS_FIELD_PRESENT")
+            })
+        }
+    }
+
+    @Test fun contextChangingFromJsonToDirectHtmlDoesNotClearCookies() = runBlocking {
+        var html = false
+        val client = OkHttpClient.Builder().cookieJar(jar).addInterceptor { chain ->
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("test")
+                .header("Content-Type", if (html) "text/html" else "application/json")
+                .body((if (html) "<html>private-page</html>" else "{\"uczniowie\":[]}").toResponseBody()).build()
+        }.build()
+        val session = sessionWithClient(client)
+        assertEquals(SessionCheck.VALID, session.checkSession())
+        html = true
+        ShadowLog.clear()
+        assertEquals(SessionCheck.INVALID_RESPONSE, session.checkSession())
+        assertFalse(session.validatePersistedSession())
+        assertEquals(1, jar.loadForRequest(url).size)
+        val logs = ShadowLog.getLogsForTag("UonetAuth").map { it.msg }.joinToString()
+        assertTrue(logs.contains("redirects=0 page=CONTEXT"))
+        assertFalse(logs.contains("SESSION_CLEAR"))
+        assertFalse(logs.contains("private-"))
+    }
+
+    @Test fun intermediateFederationPageBeforePasswordFormIsCurrentlyRejectedWithoutPosting() = runBlocking {
+        ShadowLog.clear()
+        val requests = mutableListOf<okhttp3.Request>()
+        val result = manager(contentType = "text/html", requests = requests, body = """
+            <form action='/private-target'><input type='hidden' name='wresult' value='private-token'></form>
+            <script>private-script</script>
+        """.trimIndent()).login("private-user", "private-password")
+        assertTrue(result.exceptionOrNull() is AuthenticationException.LoginFormNotFound)
+        assertEquals(listOf("GET"), requests.map { it.method })
+        val logs = ShadowLog.getLogsForTag("UonetAuth").map { it.msg }.joinToString()
+        assertTrue(logs.contains("NO_PASSWORD_INPUT"))
+        assertTrue(logs.contains("federation=true"))
+        assertTrue(logs.contains("password=false"))
+        assertFalse(logs.contains("private-"))
+    }
+
+    @Test fun formDiagnosticsDoNotConsumeBodyOrExposeFieldNamesValuesAndActions() {
+        ShadowLog.clear()
+        val html = """
+            <form action='https://private-host.example/?token=private-token'>
+              <input name='private-user' value='private-login'>
+              <input type='password' name='private-password' value='private-password-value'>
+              <input type='hidden' name='private-field' value='private-value'>
+            </form>
+        """.trimIndent()
+        val response = Response.Builder().request(okhttp3.Request.Builder().url(url).build())
+            .protocol(Protocol.HTTP_1_1).code(200).message("private-message")
+            .header("Content-Type", "text/html").body(html.toResponseBody()).build()
+        response.use {
+            it.httpDiagnostic("TEST_FORM", inspectForm = true)
+            assertEquals(html, it.body.string())
+        }
+        val logs = ShadowLog.getLogsForTag("UonetAuth").map { it.msg }.joinToString()
+        assertTrue(logs.contains("password=true passwordInForm=true login=true namedPassword=true"))
+        assertFalse(logs.contains("private-"))
+    }
+
+    @Test fun completeHtmlDiagnosticsFindLateLoginFormWithoutConsumingBody() {
+        ShadowLog.clear()
+        val html = checkNotNull(javaClass.getResource("/html/context-login.html")).readText()
+            .replace("<!-- PADDING -->", "<!--" + "x".repeat(90_000) + "-->")
+        val response = Response.Builder().request(okhttp3.Request.Builder().url(url).build())
+            .protocol(Protocol.HTTP_1_1).code(200).message("test")
+            .header("Content-Type", "text/html").body(html.toResponseBody()).build()
+        response.use {
+            it.httpDiagnostic("CONTEXT_UNEXPECTED_CONTENT", inspectForm = true)
+            assertEquals(html, it.body.string())
+        }
+        val logs = ShadowLog.getLogsForTag("UonetAuth").joinToString { it.msg }
+        assertTrue(logs.contains("sample=FULL document=LOGIN_PAGE"))
+        assertTrue(logs.contains("projectLoginForm=true"))
+        assertFalse(logs.contains("private-"))
+    }
+
+    @Test fun htmlDocumentKindNeverChangesInvalidResponseClassificationOrClearsSession() = runBlocking {
+        for ((fixture, kind) in listOf(
+            "aspnet-error" to "ERROR_PAGE", "login" to "LOGIN_PAGE",
+            "federation" to "INTERMEDIATE_PAGE", "unknown" to "UNKNOWN",
+        )) {
+            ShadowLog.clear()
+            val html = checkNotNull(javaClass.getResource("/html/context-$fixture.html")).readText()
+            assertEquals(SessionCheck.INVALID_RESPONSE, manager(contentType = "text/html", body = html).checkSession())
+            val logs = ShadowLog.getLogsForTag("UonetAuth").joinToString { it.msg }
+            assertTrue(logs.contains("document=$kind"))
+            assertTrue(logs.contains("reason=UNEXPECTED_CONTENT_TYPE"))
+            assertFalse(logs.contains("SESSION_CLEAR"))
+            assertFalse(logs.contains("private-"))
+            assertEquals(1, jar.loadForRequest(url).size)
+        }
+    }
+
+    @Test fun actualRedirectsRetainCookiesAndAreDistinctFromDirectContextHtml() = runBlocking {
+        val paths = mutableListOf<String>()
+        val cookieHeaders = mutableListOf<String?>()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange ->
+            paths += exchange.requestURI.path
+            cookieHeaders += exchange.requestHeaders.getFirst("Cookie")
+            val isContext = exchange.requestURI.path == "/lublin/api/Context"
+            if (isContext) {
+                exchange.responseHeaders.add("Set-Cookie", "fixture=private-cookie; Path=/; HttpOnly")
+                exchange.responseHeaders.add("Location", "/unexpected")
+            }
+            val body = "<html>private-page</html>".toByteArray()
+            exchange.responseHeaders.add("Content-Type", "text/html")
+            exchange.sendResponseHeaders(if (isContext) 302 else 200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.start()
+        try {
+            ShadowLog.clear()
+            val client = OkHttpClient.Builder().cookieJar(jar).addInterceptor { chain ->
+                chain.proceed(chain.request().newBuilder().url(chain.request().url.newBuilder()
+                    .scheme("http").host("127.0.0.1").port(server.address.port).build()).build())
+            }.build()
+            assertEquals(SessionCheck.INVALID_RESPONSE, sessionWithClient(client).checkSession())
+            assertEquals(listOf("/lublin/api/Context", "/unexpected"), paths)
+            assertTrue(cookieHeaders.last().orEmpty().contains("fixture=private-cookie"))
+            val restoredJar = PersistentCookieJar(RuntimeEnvironment.getApplication(), Json)
+            assertTrue(restoredJar.loadForRequest("http://127.0.0.1:${server.address.port}/".toHttpUrl())
+                .any { it.name == "fixture" })
+            val logs = ShadowLog.getLogsForTag("UonetAuth").map { it.msg }.joinToString()
+            assertTrue(logs.contains("redirects=1 page=OTHER"))
+            assertFalse(logs.contains("private-"))
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test fun lateHttpSetCookieCannotOverwriteNewLoginOrRestoreLoggedOutSession() = runBlocking {
+        for (logout in listOf(false, true)) {
+            val started = CountDownLatch(1)
+            val finish = CountDownLatch(1)
+            val current = CurrentAuthenticationSession(jar, jar::clear)
+            current.restore(AuthenticationProvider.PROJECT_UONET)
+            val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+            server.createContext("/") { exchange ->
+                started.countDown()
+                finish.await(10, TimeUnit.SECONDS)
+                exchange.responseHeaders.add("Set-Cookie", "generation-test=old; Path=/; HttpOnly")
+                exchange.sendResponseHeaders(200, 2)
+                exchange.responseBody.use { it.write("{}".toByteArray()) }
+            }
+            server.start()
+            val localUrl = "http://127.0.0.1:${server.address.port}/".toHttpUrl()
+            try {
+                val client = NetworkModule.provideOkHttpClient(current)
+                val oldRequest = async(Dispatchers.IO) {
+                    client.newCall(okhttp3.Request.Builder().url(localUrl).build()).execute().use { it.body.string() }
+                }
+                assertTrue(started.await(5, TimeUnit.SECONDS))
+                if (logout) current.invalidateAuthentication()
+                else current.withAuthentication {
+                    current.beginLogin()
+                    current.commitAuthenticationState {
+                        jar.saveFromResponse(localUrl, listOf(Cookie.Builder().name("generation-test")
+                            .value("new").hostOnlyDomain(localUrl.host).build()))
+                    }
+                    current.activate(AutoDetectLoginResult.Success(AuthenticationProvider.PROJECT_UONET))
+                }
+                finish.countDown()
+                oldRequest.await()
+                val persisted = PersistentCookieJar(RuntimeEnvironment.getApplication(), Json)
+                    .loadForRequest(localUrl).filter { it.name == "generation-test" }
+                if (logout) {
+                    assertTrue(persisted.isEmpty())
+                    assertNull(current.provider)
+                } else assertEquals("new", persisted.single().value)
+            } finally {
+                finish.countDown()
+                server.stop(0)
+            }
+        }
+    }
+
+    private fun sessionWithClient(client: OkHttpClient): UonetSessionManager {
+        val parser = UonetHtmlFormParser()
+        return UonetSessionManager(client, jar, CurrentAuthenticationSession(jar), parser,
+            WsFederationNavigator(client, parser), MessagesSessionStore(), Json)
+    }
+
     private fun manager(
         code: Int = 200,
         body: String = "{\"uczniowie\":[]}",
         transportFailure: Boolean = false,
         redirect: String? = null,
-        contentType: String = "application/json",
+        contentType: String? = "application/json",
         requests: MutableList<okhttp3.Request>? = null,
     ): UonetSessionManager {
         val current = CurrentAuthenticationSession(jar)
@@ -172,7 +394,8 @@ class UonetSessionVerificationTest {
             if (transportFailure) throw IOException("test transport failure")
             val request = if (redirect == null) chain.request() else chain.request().newBuilder().url(redirect).build()
             Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code).message("test")
-                .header("Content-Type", contentType).body(body.toResponseBody()).build()
+                .apply { if (contentType != null) header("Content-Type", contentType) }
+                .body(body.toResponseBody()).build()
         }.build()
         val parser = UonetHtmlFormParser()
         return UonetSessionManager(client, jar, current, parser, WsFederationNavigator(client, parser), MessagesSessionStore(), Json)

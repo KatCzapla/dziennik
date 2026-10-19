@@ -3,12 +3,17 @@ package pl.usagi.edziennik.network.messages
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import pl.usagi.edziennik.dto.MailboxDto
 import pl.usagi.edziennik.dto.MessageDetailsDto
@@ -16,6 +21,7 @@ import pl.usagi.edziennik.dto.ReceivedMessageDto
 import pl.usagi.edziennik.dto.UnreadMessageCountDto
 import pl.usagi.edziennik.domain.MessageMailboxType
 import pl.usagi.edziennik.network.session.SessionManager
+import pl.usagi.edziennik.network.session.CurrentAuthenticationSession
 
 class MessagesSessionManagerTest {
     @Test
@@ -122,12 +128,31 @@ class MessagesSessionManagerTest {
         assertEquals(1, apiClient.receivedCalls)
     }
 
+    @Test fun logoutDuringSsoCannotRestoreMessagesContext() = runTest {
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val store = MessagesSessionStore()
+        val current = CurrentAuthenticationSession(CookieJar.NO_COOKIES, store::clear)
+        val manager = manager(store = store, currentSession = current, ssoClient = FakeMessagesSsoClient {
+            started.complete(Unit)
+            withContext(NonCancellable) { finish.await() }
+        })
+        val sso = async { manager.ensureMessagesSession() }
+        started.await()
+        current.invalidateAuthentication()
+        finish.complete(Unit)
+        sso.join()
+        assertTrue(sso.isCancelled)
+        assertNull(store.get())
+    }
+
     private fun manager(
         sessionManager: SessionManager = FakeSessionManager(),
         urlProvider: MessagesUrlProvider = FakeMessagesUrlProvider(),
         ssoClient: FakeMessagesSsoClient = FakeMessagesSsoClient(),
         apiClient: MessagesApiClient = FakeMessagesApiClient(),
         store: MessagesSessionStore = MessagesSessionStore(),
+        currentSession: CurrentAuthenticationSession = CurrentAuthenticationSession(CookieJar.NO_COOKIES),
     ): MessagesSessionManager =
         MessagesSessionManager(
             sessionManager = sessionManager,
@@ -135,6 +160,7 @@ class MessagesSessionManagerTest {
             messagesSsoClient = ssoClient,
             messagesApiClient = apiClient,
             sessionStore = store,
+            currentSession = currentSession,
         )
 
     private class FakeSessionManager(
@@ -159,11 +185,12 @@ class MessagesSessionManagerTest {
             url ?: throw MessagesSessionException.MissingMessagesUrl
     }
 
-    private class FakeMessagesSsoClient : MessagesSsoClient {
+    private class FakeMessagesSsoClient(private val onAuthenticate: suspend () -> Unit = {}) : MessagesSsoClient {
         var calls = 0
 
         override suspend fun authenticate(appUrl: HttpUrl): MessagesSessionContext {
             calls += 1
+            onAuthenticate()
             return messagesContext(appUrl)
         }
     }

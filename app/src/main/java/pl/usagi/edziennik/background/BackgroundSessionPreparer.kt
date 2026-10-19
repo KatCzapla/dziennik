@@ -44,63 +44,97 @@ class BackgroundSessionPreparer @Inject constructor(
 
     override suspend fun prepare(): Boolean = prepareResult() == SessionPreparation.READY
 
-    override suspend fun prepareResult(): SessionPreparation {
+    override suspend fun prepareResult(): SessionPreparation = currentSession.withAuthentication {
+        prepareCoordinated()
+    }
+
+    private suspend fun prepareCoordinated(): SessionPreparation {
         preparedAccountId = null
-        val accountId = identity.currentAccountId() ?: return SessionPreparation.NO_ACCOUNT
+        var stage = "RESTORE_SESSION"
+        fun finish(result: SessionPreparation): SessionPreparation {
+            syncStageDiagnostic(stage, result.name)
+            return result
+        }
+        syncStageDiagnostic(stage, "START")
+        val accountId = identity.currentAccountId() ?: return finish(SessionPreparation.NO_ACCOUNT)
         try {
             var savedProvider: AuthenticationProvider? = null
             if (currentSession.provider == null) {
                 savedProvider = settings.getAuthenticationProvider()
-                if (identity.currentAccountId() != accountId) return SessionPreparation.ACCOUNT_CHANGED
+                if (identity.currentAccountId() != accountId) return finish(SessionPreparation.ACCOUNT_CHANGED)
                 currentSession.restore(savedProvider ?: AuthenticationProvider.PROJECT_UONET)
+                syncStageDiagnostic(stage, "RESTORED provider=${currentSession.provider?.name} default=${savedProvider == null}")
+            } else {
+                syncStageDiagnostic(stage, "REUSED provider=${currentSession.provider?.name}")
             }
+            stage = "VERIFY_EXISTING_SESSION"
+            syncStageDiagnostic(stage, "START")
             val checked = sessionManager.checkSession()
-            if (checked != SessionCheck.VALID && checked != SessionCheck.EXPIRED) return checked.preparationFailure()
+            currentSession.ensureAuthenticationCurrent()
+            syncStageDiagnostic(stage, checked.name)
+            if (checked != SessionCheck.VALID && checked != SessionCheck.EXPIRED) return finish(checked.preparationFailure())
             if (checked == SessionCheck.EXPIRED) {
-                if (!settings.isAutoLoginEnabled()) return SessionPreparation.AUTO_LOGIN_DISABLED
-                val provider = savedProvider ?: settings.getAuthenticationProvider() ?: return SessionPreparation.MISSING_PROVIDER
-                val storedCredentials = credentials.load() ?: return SessionPreparation.MISSING_CREDENTIALS
-                if (identity.currentAccountId() != accountId) return SessionPreparation.ACCOUNT_CHANGED
+                stage = "AUTO_LOGIN"
+                syncStageDiagnostic(stage, "ELIGIBILITY_CHECK")
+                if (!settings.isAutoLoginEnabled()) return finish(SessionPreparation.AUTO_LOGIN_DISABLED)
+                val provider = savedProvider ?: settings.getAuthenticationProvider() ?: return finish(SessionPreparation.MISSING_PROVIDER)
+                val storedCredentials = credentials.load() ?: return finish(SessionPreparation.MISSING_CREDENTIALS)
+                if (identity.currentAccountId() != accountId) return finish(SessionPreparation.ACCOUNT_CHANGED)
                 sessionManager.clearSession()
-                if (identity.currentAccountId() != accountId) return SessionPreparation.ACCOUNT_CHANGED
+                if (identity.currentAccountId() != accountId) return finish(SessionPreparation.ACCOUNT_CHANGED)
+                syncStageDiagnostic(stage, "START provider=${provider.name}")
+                currentSession.beginLogin()
                 val renewed = login.authenticateWithProvider(
                     provider,
                     storedCredentials.username,
                     storedCredentials.password,
                 )
-                if (identity.currentAccountId() != accountId) return SessionPreparation.ACCOUNT_CHANGED
+                currentSession.ensureAuthenticationCurrent()
+                if (identity.currentAccountId() != accountId) return finish(SessionPreparation.ACCOUNT_CHANGED)
                 when (renewed) {
                     AutoDetectLoginResult.InvalidCredentials -> {
                         settings.setAutoLoginEnabled(false)
-                        return SessionPreparation.LOGIN_REJECTED
+                        return finish(SessionPreparation.LOGIN_REJECTED)
                     }
-                    AutoDetectLoginResult.TransientError -> return SessionPreparation.LOGIN_TRANSIENT_ERROR
-                    AutoDetectLoginResult.TechnicalError -> return SessionPreparation.LOGIN_TECHNICAL_ERROR
-                    is AutoDetectLoginResult.Success -> if (renewed.provider != provider) return SessionPreparation.LOGIN_TECHNICAL_ERROR
+                    AutoDetectLoginResult.TransientError -> return finish(SessionPreparation.LOGIN_TRANSIENT_ERROR)
+                    AutoDetectLoginResult.TechnicalError -> return finish(SessionPreparation.LOGIN_TECHNICAL_ERROR)
+                    is AutoDetectLoginResult.Success -> if (renewed.provider != provider) return finish(SessionPreparation.LOGIN_TECHNICAL_ERROR)
                 }
+                syncStageDiagnostic(stage, "SUCCESS")
                 currentSession.activate(renewed)
+                stage = "VERIFY_RENEWED_SESSION"
+                syncStageDiagnostic(stage, "START")
                 val verified = sessionManager.checkSession()
+                currentSession.ensureAuthenticationCurrent()
+                syncStageDiagnostic(stage, verified.name)
                 if (verified != SessionCheck.VALID) {
                     if (verified == SessionCheck.EXPIRED) sessionManager.clearSession()
-                    return verified.preparationFailure()
+                    return finish(verified.preparationFailure())
                 }
             }
             if (activeStudentManager.activeStudent.value == null) {
+                stage = "LOAD_STUDENT_CONTEXT"
+                syncStageDiagnostic(stage, "START")
                 val available = students.getStudents()
-                if (identity.currentAccountId() != accountId) return SessionPreparation.ACCOUNT_CHANGED
+                currentSession.ensureAuthenticationCurrent()
+                if (identity.currentAccountId() != accountId) return finish(SessionPreparation.ACCOUNT_CHANGED)
                 val selected = identity.selectedStudentScopeId()
                 activeStudentManager.initialize(available)
                 if (selected != null) {
                     available.firstOrNull { identity.studentScopeId(it.diaryId) == selected }
                         ?.let(activeStudentManager::setActiveStudent)
                 }
+                syncStageDiagnostic(stage, "SUCCESS")
             }
             preparedAccountId = accountId
-            return if (isCurrent()) SessionPreparation.READY else SessionPreparation.ACCOUNT_CHANGED
+            stage = "SESSION_PREPARATION"
+            return finish(if (isCurrent()) SessionPreparation.READY else SessionPreparation.ACCOUNT_CHANGED)
         } catch (cancelled: CancellationException) {
+            syncStageDiagnostic(stage, "CANCELLED")
             throw cancelled
         } catch (failure: Exception) {
-            return if (failure.syncFailureCause().retryable) SessionPreparation.PREPARATION_TRANSIENT_ERROR else SessionPreparation.PREPARATION_ERROR
+            syncStageDiagnostic(stage, "cause=${failure.syncFailureCause().name}")
+            return finish(if (failure.syncFailureCause().retryable) SessionPreparation.PREPARATION_TRANSIENT_ERROR else SessionPreparation.PREPARATION_ERROR)
         }
     }
 

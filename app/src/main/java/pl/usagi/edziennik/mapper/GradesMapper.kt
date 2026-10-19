@@ -16,6 +16,7 @@ import pl.usagi.edziennik.dto.GradeDto
 import pl.usagi.edziennik.dto.GradesResponseDto
 import pl.usagi.edziennik.dto.GradesSettingsDto
 import pl.usagi.edziennik.dto.SubjectGradesDto
+import pl.usagi.edziennik.util.blankToNull
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -38,7 +39,7 @@ fun GradeDto.toDomain(): Grade =
         columnName = columnName,
         weight = weight.toBigDecimalOrNull(),
         color = color,
-        teacher = teacher.emptyToNull(),
+        teacher = teacher.blankToNull(),
         changedSinceLastLogin = changedSinceLastLogin,
         correctedGradeId = correctedGradeId,
     )
@@ -58,18 +59,18 @@ fun SubjectGradesDto.toDomain(): SubjectGrades =
         includeGradeWeight = includeGradeWeight,
         teachers = teachers,
         columns = columns.map { it.toDomain() },
-        practicalExamGrade = practicalExamGrade.emptyToNull(),
-        oralExamGrade = oralExamGrade.emptyToNull(),
-        proposedExamGrade = proposedExamGrade.emptyToNull(),
-        finalExamGrade = finalExamGrade.emptyToNull(),
-        pointsSum = pointsSum.emptyToNull(),
-        pointsSumAllTerms = pointsSumAllTerms.emptyToNull(),
+        practicalExamGrade = practicalExamGrade.blankToNull(),
+        oralExamGrade = oralExamGrade.blankToNull(),
+        proposedExamGrade = proposedExamGrade.blankToNull(),
+        finalExamGrade = finalExamGrade.blankToNull(),
+        pointsSum = pointsSum.blankToNull(),
+        pointsSumAllTerms = pointsSumAllTerms.blankToNull(),
         average = average.toBigDecimalOrNull(),
         averageAllTerms = averageAllTerms.toBigDecimalOrNull(),
-        proposedTermGrade = proposedTermGrade.emptyToNull(),
-        proposedTermPoints = proposedTermPoints.emptyToNull(),
-        termGrade = termGrade.emptyToNull(),
-        termPoints = termPoints.emptyToNull(),
+        proposedTermGrade = proposedTermGrade.blankToNull(),
+        proposedTermPoints = proposedTermPoints.blankToNull(),
+        termGrade = termGrade.blankToNull(),
+        termPoints = termPoints.blankToNull(),
         gradesSummary = gradesSummary,
     )
 
@@ -95,8 +96,5 @@ private fun JsonElement?.toBigDecimalOrNull(): BigDecimal? {
 
 private fun runCatchingBigDecimal(value: String): Result<BigDecimal> =
     runCatching { BigDecimal(value) }
-
-private fun String?.emptyToNull(): String? =
-    takeUnless { it.isNullOrBlank() }
 
 private val polishGradeDateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")

@@ -13,6 +13,8 @@ fun Throwable.toLoginErrorMessage(): String =
         is AuthenticationException.LoginFormNotFound,
         is AuthenticationException.WsFederationFormNotFound,
         is AuthenticationException.WsFederationStepLimitExceeded,
+        is AuthenticationException.WsFederationCycleDetected,
+        is AuthenticationException.UnsafeFederationDestination,
         is AuthenticationException.MainApplicationAuthenticationFailed ->
             "Proces logowania UONET+ nie zakończył się poprawnie."
 
